@@ -121,7 +121,7 @@ func newInstallerHarness(t *testing.T, goos, arch, downloader, checksum string) 
 			t.Fatal(err)
 		}
 	}
-	for _, tool := range []string{"sh", "tar", "grep", "sed", "awk", "head", "mktemp", "rm", "chmod", "mv", "mkdir", "cp", "cmp"} {
+	for _, tool := range []string{"sh", "tar", "gzip", "grep", "sed", "awk", "head", "mktemp", "rm", "chmod", "mv", "mkdir", "cp", "cmp"} {
 		h.linkTool(tool)
 	}
 	h.writeTool("uname", fmt.Sprintf("case \"$1\" in -s) printf '%%s\\n' %q;; -m) printf '%%s\\n' %q;; *) exit 1;; esac\n", goos, arch))
