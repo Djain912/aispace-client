@@ -95,7 +95,7 @@ go test ./... && go vet ./... && test -z "$(gofmt -l .)"
 go build -ldflags "-X main.version=0.0.0-dev" -o aispace .
 ```
 
-Releases are cut by tagging `vX.Y.Z`; `.goreleaser.yaml` builds darwin/linux amd64/arm64 assets
+Releases are cut through the manual GitHub Actions workflow; `.goreleaser.yaml` builds darwin/linux amd64/arm64 assets
 and checksums, updates the Homebrew tap, and the release workflow publishes `@aispace-sh/cli` to npm.
 See [`RELEASE.md`](RELEASE.md) for the one-time publisher configuration and release checklist.
 

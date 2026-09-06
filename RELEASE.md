@@ -1,8 +1,8 @@
 # Release process
 
-A `vX.Y.Z` tag publishes one version through GitHub Releases, npm, and Homebrew. GitHub Releases is
-the source of truth: the npm installer and Homebrew cask both download its checksum-verified native
-binaries.
+The manual `Release` workflow publishes one version through GitHub Releases, npm, and Homebrew.
+GitHub Releases is the source of truth: the npm installer and Homebrew cask both download its
+checksum-verified native binaries.
 
 ## One-time configuration
 
@@ -19,14 +19,12 @@ binaries.
 
 ## Release
 
-```sh
-git switch main
-git pull --ff-only
-go test -race ./...
-(cd npm && npm test && npm pack --dry-run)
-git tag v0.1.0
-git push origin v0.1.0
-```
+1. Open **Actions → Release → Run workflow**.
+2. Select the `main` branch and enter a version without the `v` prefix, such as `0.1.0`.
+3. Start the workflow. It validates the version and credentials, runs the Go and npm test suites,
+   performs GoReleaser and npm publication dry runs, and only then creates the tag and publishes.
+4. Confirm the final verification job installs the published npm package and reports the requested
+   version.
 
 The release job must finish before npm publication starts, because the npm postinstall script
 downloads the native binary and `checksums.txt` from that GitHub release. GoReleaser updates
