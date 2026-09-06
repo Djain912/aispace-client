@@ -82,4 +82,4 @@ release:
 
     Pin this version: `AISPACE_VERSION={{ .Tag }} curl -fsSL https://aispace.sh/install.sh | sh`
 
-    Other package managers: `npm install -g aispace-cli` or `brew install aispace-sh/tap/aispace`.
+    Other package managers: `npm install -g @aispace-sh/cli` or `brew install aispace-sh/tap/aispace`.

@@ -4,7 +4,7 @@ Installs the native [`aispace`](https://github.com/aispace-sh/aispace-client) bi
 Linux and verifies it against the SHA-256 checksums published with the matching GitHub release.
 
 ```sh
-npm install -g aispace-cli
+npm install -g @aispace-sh/cli
 aispace login --key ask_...
 ```
 

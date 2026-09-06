@@ -9,7 +9,7 @@ binaries.
 1. Create the public `aispace-sh/homebrew-tap` repository with a `Casks` directory.
 2. Add a fine-grained GitHub token as the `HOMEBREW_TAP_GITHUB_TOKEN` repository secret. Restrict it
    to `aispace-sh/homebrew-tap` with Contents read/write permission.
-3. Publish `aispace-cli` once from an npm account that owns the package, using a granular automation
+3. Publish `@aispace-sh/cli` once from the `aispace-sh` npm organization, using a granular automation
    token stored as the `NPM_TOKEN` repository secret.
 4. After the first npm release, configure npm trusted publishing for repository
    `aispace-sh/aispace-client` and workflow `release.yml`, then remove `NPM_TOKEN` and its workflow
@@ -35,7 +35,7 @@ downloads the native binary and `checksums.txt` from that GitHub release. GoRele
 ## Verify
 
 ```sh
-npm install -g aispace-cli
+npm install -g @aispace-sh/cli
 aispace version
 
 brew install aispace-sh/tap/aispace
