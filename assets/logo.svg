@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">aispace</title>
+  <rect width="512" height="512" rx="112" fill="#16161a"/>
+  <path d="M160 360 256 152 352 360" fill="none" stroke="#fbfbfa" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M202 275h108" fill="none" stroke="#fbfbfa" stroke-width="36" stroke-linecap="round" stroke-dasharray="26 54"/>
+</svg>

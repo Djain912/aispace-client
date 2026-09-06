@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.svg" width="112" height="112" alt="aispace logo">
+</p>
+
 # aispace client
 
 The open-source CLI and agent skill for [aispace.sh](https://aispace.sh), a bot-friendly file drop.
