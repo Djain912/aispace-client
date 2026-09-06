@@ -1,0 +1,8 @@
+interface:
+  display_name: "aispace"
+  short_description: "Secure temporary file handoffs for agents"
+  brand_color: "#2563EB"
+  default_prompt: "Use $aispace to securely share or receive this artifact with an expiring link."
+
+policy:
+  allow_implicit_invocation: true

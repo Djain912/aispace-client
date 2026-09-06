@@ -1,0 +1,374 @@
+// Package api is a small client for the aispace bot API (/v1).
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// MaxRetryAfter caps how long the client waits before retrying a 429.
+const MaxRetryAfter = 30 * time.Second
+
+// DefaultRetryAfter is used when a 429 carries no usable Retry-After header.
+const DefaultRetryAfter = time.Second
+
+// Client talks to one aispace server with one bot key.
+type Client struct {
+	BaseURL   string
+	Key       string
+	UserAgent string
+	HTTP      *http.Client
+	// Sleep overrides retry waiting for tests. Nil uses a context-aware timer.
+	Sleep func(time.Duration)
+}
+
+// New returns a Client with sane defaults. baseURL must include the scheme.
+func New(baseURL, key, userAgent string) *Client {
+	return &Client{
+		BaseURL:   strings.TrimRight(baseURL, "/"),
+		Key:       key,
+		UserAgent: userAgent,
+		HTTP:      &http.Client{Timeout: 10 * time.Minute},
+	}
+}
+
+// UploadOptions describe a raw-body upload.
+type UploadOptions struct {
+	Name        string
+	ContentType string
+	// Encryption names the client-side encryption format. Empty means plaintext.
+	Encryption string
+	// Size is the exact number of bytes in Body; sent as Content-Length.
+	Size int64
+	// ExpiresIn seconds; zero means "server default".
+	ExpiresIn int64
+	// SHA256 hex; empty means "do not send".
+	SHA256 string
+}
+
+// Upload streams body to POST /v1/files.
+func (c *Client) Upload(ctx context.Context, body io.Reader, opts UploadOptions) (Result[File], error) {
+	req, err := c.newRequest(ctx, http.MethodPost, "/v1/files", body)
+	if err != nil {
+		return Result[File]{}, err
+	}
+	req.ContentLength = opts.Size
+	if opts.Size == 0 {
+		// Force an explicit "Content-Length: 0" instead of a chunked/absent header.
+		req.Body = http.NoBody
+	}
+	ct := opts.ContentType
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	req.Header.Set("Content-Type", ct)
+	if opts.Name != "" {
+		req.Header.Set("X-File-Name", opts.Name)
+	}
+	if opts.ExpiresIn > 0 {
+		req.Header.Set("X-Expires-In", strconv.FormatInt(opts.ExpiresIn, 10))
+	}
+	if opts.SHA256 != "" {
+		req.Header.Set("X-SHA256", opts.SHA256)
+	}
+	if opts.Encryption != "" {
+		req.Header.Set("X-Aispace-Encryption", opts.Encryption)
+	}
+	return do[File](c, req, http.StatusCreated)
+}
+
+// ListFiles fetches one page of GET /v1/files.
+func (c *Client) ListFiles(ctx context.Context, cursor string, limit int) (Result[FileList], error) {
+	q := url.Values{}
+	if cursor != "" {
+		q.Set("cursor", cursor)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/v1/files"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return Result[FileList]{}, err
+	}
+	return do[FileList](c, req, http.StatusOK)
+}
+
+// WalkFiles follows next_cursor until exhausted and visits each decoded page.
+func (c *Client) WalkFiles(ctx context.Context, visit func([]json.RawMessage, []File) error) error {
+	cursor := ""
+	seen := map[string]struct{}{}
+	for {
+		res, err := c.ListFiles(ctx, cursor, 0)
+		if err != nil {
+			return err
+		}
+		files := make([]File, len(res.Value.Files))
+		for i, r := range res.Value.Files {
+			if err := json.Unmarshal(r, &files[i]); err != nil {
+				return &Error{Code: "bad_response", Message: "cannot decode file entry: " + err.Error(), cause: err}
+			}
+		}
+		if err := visit(res.Value.Files, files); err != nil {
+			return err
+		}
+		next := res.Value.NextCursor
+		if next == nil || *next == "" {
+			return nil
+		}
+		if _, ok := seen[*next]; ok {
+			return &Error{Code: "bad_response", Message: "pagination loop: repeated cursor"}
+		}
+		seen[*next] = struct{}{}
+		cursor = *next
+	}
+}
+
+// ListAllFiles follows next_cursor until exhausted and returns every file's
+// raw JSON plus the decoded values.
+func (c *Client) ListAllFiles(ctx context.Context) ([]json.RawMessage, []File, error) {
+	var raws []json.RawMessage
+	var files []File
+	err := c.WalkFiles(ctx, func(pageRaws []json.RawMessage, pageFiles []File) error {
+		raws = append(raws, pageRaws...)
+		files = append(files, pageFiles...)
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return raws, files, nil
+}
+
+// GetFile fetches GET /v1/files/:id.
+func (c *Client) GetFile(ctx context.Context, id string) (Result[File], error) {
+	req, err := c.newRequest(ctx, http.MethodGet, "/v1/files/"+url.PathEscape(id), nil)
+	if err != nil {
+		return Result[File]{}, err
+	}
+	return do[File](c, req, http.StatusOK)
+}
+
+// DeleteFile calls DELETE /v1/files/:id.
+func (c *Client) DeleteFile(ctx context.Context, id string) error {
+	req, err := c.newRequest(ctx, http.MethodDelete, "/v1/files/"+url.PathEscape(id), nil)
+	if err != nil {
+		return err
+	}
+	_, err = do[struct{}](c, req, http.StatusNoContent)
+	return err
+}
+
+// LinkOptions describe a share link creation.
+type LinkOptions struct {
+	// ExpiresIn seconds; zero means "server default".
+	ExpiresIn int64
+	// MaxDownloads; zero means unlimited / not sent.
+	MaxDownloads int64
+}
+
+// CreateLink calls POST /v1/files/:id/links.
+func (c *Client) CreateLink(ctx context.Context, fileID string, opts LinkOptions) (Result[ShareLink], error) {
+	payload := map[string]int64{}
+	if opts.ExpiresIn > 0 {
+		payload["expires_in"] = opts.ExpiresIn
+	}
+	if opts.MaxDownloads > 0 {
+		payload["max_downloads"] = opts.MaxDownloads
+	}
+	buf, _ := json.Marshal(payload)
+	req, err := c.newRequest(ctx, http.MethodPost, "/v1/files/"+url.PathEscape(fileID)+"/links", bytes.NewReader(buf))
+	if err != nil {
+		return Result[ShareLink]{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return do[ShareLink](c, req, http.StatusCreated)
+}
+
+// ListLinks calls GET /v1/files/:id/links.
+func (c *Client) ListLinks(ctx context.Context, fileID string) (Result[LinkList], error) {
+	req, err := c.newRequest(ctx, http.MethodGet, "/v1/files/"+url.PathEscape(fileID)+"/links", nil)
+	if err != nil {
+		return Result[LinkList]{}, err
+	}
+	return do[LinkList](c, req, http.StatusOK)
+}
+
+// RevokeLink calls DELETE /v1/links/:id.
+func (c *Client) RevokeLink(ctx context.Context, id string) error {
+	req, err := c.newRequest(ctx, http.MethodDelete, "/v1/links/"+url.PathEscape(id), nil)
+	if err != nil {
+		return err
+	}
+	_, err = do[struct{}](c, req, http.StatusNoContent)
+	return err
+}
+
+// Quota calls GET /v1/quota.
+func (c *Client) Quota(ctx context.Context) (Result[Quota], error) {
+	req, err := c.newRequest(ctx, http.MethodGet, "/v1/quota", nil)
+	if err != nil {
+		return Result[Quota]{}, err
+	}
+	return do[Quota](c, req, http.StatusOK)
+}
+
+// Whoami calls GET /v1/whoami.
+func (c *Client) Whoami(ctx context.Context) (Result[Whoami], error) {
+	req, err := c.newRequest(ctx, http.MethodGet, "/v1/whoami", nil)
+	if err != nil {
+		return Result[Whoami]{}, err
+	}
+	return do[Whoami](c, req, http.StatusOK)
+}
+
+func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	if c.BaseURL == "" {
+		return nil, &Error{Code: "config", Message: "no base URL configured"}
+	}
+	if c.Key == "" {
+		return nil, &Error{Status: http.StatusUnauthorized, Code: "unauthenticated", Message: "no API key: run `aispace login --key ask_...` or set AISPACE_KEY"}
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
+	if err != nil {
+		return nil, &Error{Code: "bad_request", Message: err.Error(), cause: err}
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Key)
+	req.Header.Set("Accept", "application/json")
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	return req, nil
+}
+
+// do executes the request, retrying once on 429 for GET requests.
+func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) {
+	httpc := c.HTTP
+	if httpc == nil {
+		httpc = http.DefaultClient
+	}
+	resp, body, err := send(httpc, req)
+	if err != nil {
+		return Result[T]{}, err
+	}
+	if resp.StatusCode == http.StatusTooManyRequests && req.Method == http.MethodGet {
+		wait := retryDelay(resp.Header.Get("Retry-After"))
+		if err := waitForRetry(req.Context(), wait, c.Sleep); err != nil {
+			return Result[T]{}, err
+		}
+		retry := req.Clone(req.Context())
+		resp, body, err = send(httpc, retry)
+		if err != nil {
+			return Result[T]{}, err
+		}
+	}
+	if resp.StatusCode != wantStatus && (resp.StatusCode < 200 || resp.StatusCode > 299) {
+		return Result[T]{}, errorFromResponse(resp, body)
+	}
+	var out Result[T]
+	if wantStatus == http.StatusNoContent || len(bytes.TrimSpace(body)) == 0 {
+		return out, nil
+	}
+	out.Raw = json.RawMessage(bytes.TrimSpace(body))
+	if err := json.Unmarshal(body, &out.Value); err != nil {
+		return Result[T]{}, &Error{Status: resp.StatusCode, Code: "bad_response", Message: fmt.Sprintf("cannot decode response: %v", err), cause: err}
+	}
+	return out, nil
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration, sleep func(time.Duration)) error {
+	if sleep == nil {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+	done := make(chan struct{}, 1)
+	go func() {
+		sleep(delay)
+		done <- struct{}{}
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return nil
+	}
+}
+
+func send(httpc *http.Client, req *http.Request) (*http.Response, []byte, error) {
+	resp, err := httpc.Do(req)
+	if err != nil {
+		var uerr *url.Error
+		msg := err.Error()
+		if errors.As(err, &uerr) {
+			msg = fmt.Sprintf("%s %s: %v", uerr.Op, redact(uerr.URL), uerr.Err)
+		}
+		return nil, nil, &Error{Code: "network", Message: msg, cause: err}
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, nil, &Error{Code: "network", Message: "reading response: " + err.Error(), cause: err}
+	}
+	return resp, body, nil
+}
+
+// redact strips any query string from a URL before it lands in an error message.
+func redact(u string) string {
+	if i := strings.IndexByte(u, '?'); i >= 0 {
+		return u[:i]
+	}
+	return u
+}
+
+func retryDelay(header string) time.Duration {
+	secs := parseRetryAfter(header)
+	if secs < 0 {
+		return DefaultRetryAfter
+	}
+	d := time.Duration(secs) * time.Second
+	if d > MaxRetryAfter {
+		d = MaxRetryAfter
+	}
+	return d
+}
+
+// parseRetryAfter returns seconds (>= 0) or -1 when the header is absent/unparseable.
+// It accepts delta-seconds and HTTP-date forms.
+func parseRetryAfter(v string) int {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return -1
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		if n < 0 {
+			return 0
+		}
+		return n
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		d := time.Until(t)
+		if d < 0 {
+			return 0
+		}
+		return int(d.Round(time.Second) / time.Second)
+	}
+	return -1
+}

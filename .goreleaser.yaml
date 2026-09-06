@@ -1,0 +1,65 @@
+# GoReleaser config for the aispace CLI.
+#
+# Run from the repository root on tags like `v1.2.3`.
+version: 2
+
+project_name: aispace
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: aispace
+    main: .
+    binary: aispace
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ trimprefix .Tag "v" }}
+
+archives:
+  - id: tarballs
+    ids: [aispace]
+    formats: [tar.gz]
+    name_template: "aispace_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ trimprefix .Tag \"v\" }}-next"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: aispace-sh
+    name: aispace-client
+  name_template: "aispace CLI v{{ trimprefix .Tag \"v\" }}"
+  footer: |
+    Install or upgrade:
+
+        curl -fsSL https://aispace.sh/install.sh | sh
+
+    Pin this version: `AISPACE_VERSION={{ .Tag }} curl -fsSL https://aispace.sh/install.sh | sh`
