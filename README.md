@@ -13,6 +13,10 @@ machine-readable JSON, and optional local age encryption.
 
 ```sh
 curl -fsSL https://aispace.sh/install.sh | sh
+# npm
+npm install -g aispace-cli
+# Homebrew
+brew install aispace-sh/tap/aispace
 # pin a version
 AISPACE_VERSION=v1.2.3 curl -fsSL https://aispace.sh/install.sh | sh
 # or with Go
@@ -91,8 +95,9 @@ go test ./... && go vet ./... && test -z "$(gofmt -l .)"
 go build -ldflags "-X main.version=0.0.0-dev" -o aispace .
 ```
 
-Releases are cut by tagging `vX.Y.Z`; `.goreleaser.yaml` builds darwin/linux amd64/arm64 tarballs
-named `aispace_<os>_<arch>.tar.gz` plus `checksums.txt`.
+Releases are cut by tagging `vX.Y.Z`; `.goreleaser.yaml` builds darwin/linux amd64/arm64 assets
+and checksums, updates the Homebrew tap, and the release workflow publishes `aispace-cli` to npm.
+See [`RELEASE.md`](RELEASE.md) for the one-time publisher configuration and release checklist.
 
 ## Agent skill
 

@@ -35,6 +35,24 @@ archives:
     name_template: "aispace_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
+  - id: npm-binaries
+    ids: [aispace]
+    formats: [binary]
+    name_template: "aispace_{{ .Os }}_{{ .Arch }}"
+
+homebrew_casks:
+  - name: aispace
+    ids: [tarballs]
+    binaries: [aispace]
+    homepage: "https://aispace.sh"
+    description: "Bot-friendly file drop with expiring links"
+    repository:
+      owner: aispace-sh
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: aispace release bot
+      email: releases@aispace.sh
 
 checksum:
   name_template: "checksums.txt"
@@ -63,3 +81,5 @@ release:
         curl -fsSL https://aispace.sh/install.sh | sh
 
     Pin this version: `AISPACE_VERSION={{ .Tag }} curl -fsSL https://aispace.sh/install.sh | sh`
+
+    Other package managers: `npm install -g aispace-cli` or `brew install aispace-sh/tap/aispace`.

@@ -28,3 +28,6 @@ jobs:
       - run: go test -race ./...
       - run: go build -trimpath -o aispace .
       - run: sh -n install.sh
+      - name: Test npm wrapper
+        working-directory: npm
+        run: npm test && npm pack --dry-run

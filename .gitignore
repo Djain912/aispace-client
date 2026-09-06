@@ -3,3 +3,5 @@
 *.agekey
 *.tmp
 .DS_Store
+/npm/bin/aispace
+/npm/*.tgz
