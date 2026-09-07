@@ -1,4 +1,5 @@
 # Build output.
+/.gocache/
 /aispace
 /aispace.exe
 # Default `go build .` output, named after the module rather than the binary.
