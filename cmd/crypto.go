@@ -32,7 +32,9 @@ type encryptedUpload struct {
 	Identity     string
 	IdentityFile string
 	OriginalName string
-	cleanup      func()
+	recoveryFile string
+	identityPath string
+	cleanupBody  func()
 }
 
 type encryptionOutput struct {
@@ -92,7 +94,7 @@ func (a *app) keygenCmd() *cobra.Command {
 	return cmd
 }
 
-func encryptForUpload(src io.Reader, originalName, recipientText, identityOut string) (*encryptedUpload, error) {
+func encryptForUpload(src io.Reader, originalName, recipientText, identityOut, recoveryDir string) (*encryptedUpload, error) {
 	var recipient age.Recipient
 	var identity string
 	if recipientText != "" {
@@ -112,45 +114,62 @@ func encryptForUpload(src io.Reader, originalName, recipientText, identityOut st
 		identity = generated.String()
 	}
 
+	identityPath := identityOut
+	recoveryFile := ""
 	if identityOut != "" {
 		if err := writeSecretFile(identityOut, identity+"\n"); err != nil {
 			return nil, err
 		}
+	} else if identity != "" {
+		var err error
+		recoveryFile, err = writeRecoveryIdentity(recoveryDir, identity+"\n")
+		if err != nil {
+			return nil, err
+		}
+		identityPath = recoveryFile
 	}
+	cleanupIdentity := func() { _ = os.Remove(identityPath) }
 
 	tmp, err := os.CreateTemp("", "aispace-encrypted-*.age")
 	if err != nil {
+		cleanupIdentity()
 		return nil, &codedError{code: "io", err: fmt.Errorf("create encryption temp file: %w", err), exit: ExitGeneric}
 	}
-	cleanup := func() {
+	cleanupBody := func() {
 		_ = tmp.Close()
 		_ = os.Remove(tmp.Name())
 	}
 	if err := tmp.Chmod(0o600); err != nil {
-		cleanup()
+		cleanupBody()
+		cleanupIdentity()
 		return nil, &codedError{code: "io", err: fmt.Errorf("secure encryption temp file: %w", err), exit: ExitGeneric}
 	}
 	w, err := age.Encrypt(tmp, recipient)
 	if err != nil {
-		cleanup()
+		cleanupBody()
+		cleanupIdentity()
 		return nil, &codedError{code: "encryption", err: fmt.Errorf("start encryption: %w", err), exit: ExitGeneric}
 	}
 	if _, err := io.Copy(w, src); err != nil {
 		_ = w.Close()
-		cleanup()
+		cleanupBody()
+		cleanupIdentity()
 		return nil, &codedError{code: "io", err: fmt.Errorf("encrypt %s: %w", originalName, err), exit: ExitGeneric}
 	}
 	if err := w.Close(); err != nil {
-		cleanup()
+		cleanupBody()
+		cleanupIdentity()
 		return nil, &codedError{code: "encryption", err: fmt.Errorf("finish encryption: %w", err), exit: ExitGeneric}
 	}
 	st, err := tmp.Stat()
 	if err != nil {
-		cleanup()
+		cleanupBody()
+		cleanupIdentity()
 		return nil, &codedError{code: "io", err: fmt.Errorf("stat encrypted file: %w", err), exit: ExitGeneric}
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		cleanup()
+		cleanupBody()
+		cleanupIdentity()
 		return nil, &codedError{code: "io", err: fmt.Errorf("rewind encrypted file: %w", err), exit: ExitGeneric}
 	}
 	return &encryptedUpload{
@@ -160,8 +179,66 @@ func encryptForUpload(src io.Reader, originalName, recipientText, identityOut st
 		Identity:     identity,
 		IdentityFile: identityOut,
 		OriginalName: originalName,
-		cleanup:      cleanup,
+		recoveryFile: recoveryFile,
+		identityPath: identityPath,
+		cleanupBody:  cleanupBody,
 	}, nil
+}
+
+func writeRecoveryIdentity(dir, value string) (string, error) {
+	if dir == "" {
+		return "", &codedError{code: "config", err: errors.New("recovery identity directory is not configured"), exit: ExitGeneric}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", &codedError{code: "io", err: fmt.Errorf("create recovery identity directory: %w", err), exit: ExitGeneric}
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return "", &codedError{code: "io", err: fmt.Errorf("secure recovery identity directory: %w", err), exit: ExitGeneric}
+		}
+	}
+	f, err := os.CreateTemp(dir, "identity-*.agekey")
+	if err != nil {
+		return "", &codedError{code: "io", err: fmt.Errorf("create recovery identity file: %w", err), exit: ExitGeneric}
+	}
+	path := f.Name()
+	ok := false
+	defer func() {
+		_ = f.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		return "", &codedError{code: "io", err: fmt.Errorf("secure recovery identity file: %w", err), exit: ExitGeneric}
+	}
+	if _, err := io.WriteString(f, value); err != nil {
+		return "", &codedError{code: "io", err: fmt.Errorf("write recovery identity file: %w", err), exit: ExitGeneric}
+	}
+	if err := f.Close(); err != nil {
+		return "", &codedError{code: "io", err: fmt.Errorf("close recovery identity file: %w", err), exit: ExitGeneric}
+	}
+	ok = true
+	return path, nil
+}
+
+func (e *encryptedUpload) cleanup() {
+	e.cleanupBody()
+	if e.identityPath != "" {
+		_ = os.Remove(e.identityPath)
+	}
+}
+
+func (e *encryptedUpload) preserveIdentity() string {
+	path := e.identityPath
+	e.identityPath = ""
+	return path
+}
+
+func (e *encryptedUpload) uploadConfirmed() {
+	if e.IdentityFile != "" {
+		e.preserveIdentity()
+	}
 }
 
 func writeSecretFile(path, value string) error {

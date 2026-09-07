@@ -15,7 +15,6 @@ large item helps confirm the intended shape.
 
 - Add copyable examples for more CI systems and agent runtimes.
 - Evaluate Windows code signing and a native package-manager channel.
-- Add opt-in shell completion installation.
 - Improve diagnostics for network, quota, and configuration failures.
 
 ## Later: larger and longer-running workflows

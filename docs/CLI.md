@@ -133,6 +133,17 @@ given up on quickly:
 | Waiting for response headers | 60s |
 | Upload/download with no byte progress | 2m |
 
+A transfer that trips the inactivity timer fails with exit `1` and code `timeout`, whether it
+stalled before the body started or part-way through it:
+
+```
+error: transfer stalled without byte progress (timeout)
+error: transfer stalled (timeout)
+```
+
+A partly written output file is removed, so a stalled download never leaves a truncated file
+behind.
+
 `Ctrl-C`/`SIGTERM` cancels in-flight requests, closes stdin to unblock ordinary pipes, and exits `1`
 with code `interrupted`. After the first signal, default handling is restored so a second interrupt
 can terminate a source that cannot be closed cleanly.
@@ -257,7 +268,11 @@ If the server *rejects* the upload (quota, size, rate limit, bad key), a file wr
 leaving it behind would make retrying the same command fail with `identity file already exists`.
 When the request fails without a response or returns a 5xx server error, the outcome is uncertain,
 so the identity is kept and a warning names it — check `aispace ls` before deleting it, because the
-file may have been stored.
+file may have been stored. When no `--identity-out` was supplied, the CLI creates a mode-`0600`
+recovery identity under the private aispace configuration directory (`recovery/` beside
+`config.json`). It removes that recovery copy after a definite success or rejection, but keeps it
+and prints its path after an uncertain outcome. If the process is terminated abruptly, inspect that
+directory before removing a leftover key; it may be the only way to decrypt a stored upload.
 
 ### `aispace download`
 
@@ -358,10 +373,10 @@ Exit 1 with `not_found` if the file is unknown to this key or already expired.
 ### `aispace ls`
 
 ```
-aispace ls [--all] [--json]
+aispace ls [--limit N] [--cursor C] [--all] [--json]
 ```
 
-Lists this key's live files (`GET /v1/files`). It **always** follows `next_cursor` to the end, in
+Lists this key's live files (`GET /v1/files`). By default it follows `next_cursor` to the end, in
 both human and `--json` mode. `--all` is accepted for compatibility and does nothing.
 
 Human output is one line per file, `<id> <size> <expires> <name>`, with no header:
@@ -373,7 +388,7 @@ Human output is one line per file, `<id> <size> <expires> <name>`, with no heade
 
 When the key holds no files, nothing is written to stdout and `no files` goes to stderr, so a
 `--json`-free pipeline stays empty. `--json` prints every page merged into one object, with
-`next_cursor` always `null` because the walk is already finished:
+`next_cursor` `null` because the walk is already finished:
 
 ```sh
 # total bytes held by this key
@@ -381,6 +396,39 @@ aispace ls --json | jq '[.files[].size_bytes] | add'
 
 # files expiring within 24 h
 aispace ls --json | jq -r --argjson t "$(date +%s)" '.files[] | select(.expires_at - $t < 86400) | .name'
+```
+
+#### Paging a large account
+
+Walking to the end costs one request per page, which is wasteful when only the first few files are
+wanted. `--limit N` stops after N files instead:
+
+```sh
+aispace ls --limit 50 --json
+```
+
+Each request asks for exactly the number still wanted, so `next_cursor` stays aligned with what was
+consumed — it is the resume point, not the end of the last page. Pass it back with `--cursor` to
+continue, and it is `null` once the listing is exhausted:
+
+```sh
+cursor=""
+while :; do
+  page=$(aispace ls --limit 100 ${cursor:+--cursor "$cursor"} --json)
+  echo "$page" | jq -r '.files[].id'
+  cursor=$(echo "$page" | jq -r '.next_cursor // empty')
+  [ -n "$cursor" ] || break
+done
+```
+
+Resuming is exact: no file is skipped and none is returned twice. In human mode stdout stays one
+line per file and the resume hint goes to stderr, so a pipeline is unaffected:
+
+```
+$ aispace ls --limit 3
+01J8ZQ3V9N7X2K4M6P8R0T2W4Y 1.0 MB 2026-09-12T17:00:00Z report.pdf
+...
+more files remain; continue with --limit 3 --cursor 3        # stderr
 ```
 
 ### `aispace rm`
@@ -540,8 +588,59 @@ AISPACE_URL=http://localhost:8787 AISPACE_KEY=ask_dev... aispace quota
 
 ## Shell completion
 
+```
+aispace completion <bash|zsh|fish|powershell>
+aispace completion install [bash|zsh|fish] [--dir PATH] [--force] [--json]
+```
+
+`aispace completion <shell>` writes the script to stdout. `aispace completion install` writes it to
+the directory that shell already reads, so nothing has to be sourced by hand.
+
+### Persistent installation
+
 ```sh
-aispace completion bash > /etc/bash_completion.d/aispace
-aispace completion zsh > "${fpath[1]}/_aispace"
-aispace completion fish > ~/.config/fish/completions/aispace.fish
+aispace completion install            # shell taken from $SHELL
+aispace completion install zsh        # or name it
+```
+
+The destination follows the XDG variables the rest of the CLI honours, and the path is printed:
+
+| Shell | Destination |
+|---|---|
+| bash | `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/aispace` |
+| zsh | `${XDG_DATA_HOME:-~/.local/share}/zsh/site-functions/_aispace` |
+| fish | `${XDG_CONFIG_HOME:-~/.config}/fish/completions/aispace.fish` |
+
+An existing file is **never replaced**; the command exits `2` and names the file, so a hand-edited
+completion is not silently lost. Pass `--force` to replace it, or `--dir` to install somewhere else
+(for example a system-wide `/etc/bash_completion.d`). Only that one file is written.
+
+Two shells need one more step, reported on stderr so stdout stays just the installed path:
+
+- **zsh** reads the directory only if it is on `$fpath`. Add to `~/.zshrc` if missing:
+  ```sh
+  fpath=(~/.local/share/zsh/site-functions $fpath)
+  ```
+- **bash** reads the directory only when the `bash-completion` package is loaded.
+
+Start a new shell afterwards, or re-run the shell's completion init.
+
+### Current session only
+
+Nothing is written to disk; the completions last until the shell exits.
+
+```sh
+source <(aispace completion bash)          # bash
+source <(aispace completion zsh)           # zsh
+aispace completion fish | source           # fish
+```
+
+### PowerShell
+
+PowerShell loads completions from a profile rather than a directory, so `install` does not support
+it and says so. Append the script to your profile instead:
+
+```powershell
+aispace completion powershell | Out-String | Invoke-Expression          # current session
+aispace completion powershell >> $PROFILE                               # persistent
 ```

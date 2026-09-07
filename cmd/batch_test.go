@@ -13,11 +13,12 @@ import (
 // batchServer deletes anything except IDs containing "missing", which 404, and
 // fails everything with 401 once unauthorized is set.
 type batchServer struct {
-	mu           sync.Mutex
-	srv          *httptest.Server
-	key          string
-	unauthorized bool
-	seen         []string
+	mu                sync.Mutex
+	srv               *httptest.Server
+	key               string
+	unauthorized      bool
+	unauthorizedAfter int
+	seen              []string
 }
 
 func newBatchServer(t *testing.T) *batchServer {
@@ -27,7 +28,7 @@ func newBatchServer(t *testing.T) *batchServer {
 		id := r.URL.Path[strings.LastIndexByte(r.URL.Path, '/')+1:]
 		b.mu.Lock()
 		b.seen = append(b.seen, id)
-		unauth := b.unauthorized
+		unauth := b.unauthorized || b.unauthorizedAfter > 0 && len(b.seen) > b.unauthorizedAfter
 		b.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -113,6 +114,27 @@ func TestRmContinueStopsOnUnauthorized(t *testing.T) {
 	}
 	if got := b.attempted(); len(got) != 1 {
 		t.Fatalf("attempted %v, want to give up after the first 401", got)
+	}
+}
+
+func TestRmContinueReportsLaterFatalError(t *testing.T) {
+	isolate(t)
+	b := newBatchServer(t)
+	b.unauthorizedAfter = 1
+	writeConfig(t, config.File{Key: b.key, URL: b.srv.URL})
+
+	r := run("", "rm", "--continue", "missing1", "second", "third")
+	if r.code != ExitAuth {
+		t.Fatalf("exit = %d, want %d: %+v", r.code, ExitAuth, r)
+	}
+	if got := b.attempted(); len(got) != 2 {
+		t.Fatalf("attempted %v, want to stop after the later 401", got)
+	}
+	if !strings.Contains(r.stderr, "missing1: No such id") || !strings.Contains(r.stderr, "second: Invalid key") {
+		t.Fatalf("stderr must report both attempted failures: %q", r.stderr)
+	}
+	if strings.Contains(r.stderr, "third") {
+		t.Fatalf("unattempted ID was reported: %q", r.stderr)
 	}
 }
 

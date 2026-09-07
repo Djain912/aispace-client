@@ -400,6 +400,20 @@ func TestListAllFilesPaginates(t *testing.T) {
 	}
 }
 
+func TestListPageRejectsMoreFilesThanRequested(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("limit"); got != "1" {
+			t.Errorf("limit = %q, want 1", got)
+		}
+		_, _ = w.Write([]byte(`{"files":[{"id":"a"},{"id":"b"}],"next_cursor":"b"}`))
+	})
+	_, _, _, err := c.ListPage(context.Background(), "", 1)
+	var ae *Error
+	if !errors.As(err, &ae) || ae.Code != "bad_response" || !strings.Contains(ae.Message, "returned 2 files") {
+		t.Fatalf("error = %v, want bad_response for an overfull page", err)
+	}
+}
+
 func TestListAllFilesDetectsLoop(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"files":[],"next_cursor":"same"}`))

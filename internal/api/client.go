@@ -205,6 +205,8 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 	}
 }
 
+const maxListFilesLimit = 100
+
 // ListFiles fetches one page of GET /v1/files.
 func (c *Client) ListFiles(ctx context.Context, cursor string, limit int) (Result[FileList], error) {
 	q := url.Values{}
@@ -225,9 +227,62 @@ func (c *Client) ListFiles(ctx context.Context, cursor string, limit int) (Resul
 	return do[FileList](c, req, http.StatusOK)
 }
 
+// ListPage fetches at most limit files starting at cursor, following
+// next_cursor only as far as it needs to. It returns the raw entries, the
+// decoded values, and the cursor to resume from, which is empty once the
+// listing is exhausted.
+//
+// Each request asks for the smaller of the number still wanted and the API's
+// per-request maximum, so the cursor stays aligned with what was consumed.
+func (c *Client) ListPage(ctx context.Context, cursor string, limit int) ([]json.RawMessage, []File, string, error) {
+	if limit <= 0 {
+		return nil, nil, "", &Error{Code: "bad_request", Message: "limit must be positive"}
+	}
+	var raws []json.RawMessage
+	var files []File
+	seen := map[string]struct{}{}
+	for len(raws) < limit {
+		requestLimit := min(limit-len(raws), maxListFilesLimit)
+		res, err := c.ListFiles(ctx, cursor, requestLimit)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		page := res.Value.Files
+		if len(page) > requestLimit {
+			return nil, nil, "", &Error{Code: "bad_response", Message: fmt.Sprintf("server returned %d files after a request for at most %d", len(page), requestLimit)}
+		}
+		for _, raw := range page {
+			var f File
+			if err := json.Unmarshal(raw, &f); err != nil {
+				return nil, nil, "", &Error{Code: "bad_response", Message: "cannot decode file entry: " + err.Error(), cause: err}
+			}
+			raws = append(raws, raw)
+			files = append(files, f)
+		}
+		next := res.Value.NextCursor
+		if next == nil || *next == "" {
+			return raws, files, "", nil
+		}
+		if _, ok := seen[*next]; ok {
+			return nil, nil, "", &Error{Code: "bad_response", Message: "pagination loop: repeated cursor"}
+		}
+		seen[*next] = struct{}{}
+		cursor = *next
+		if len(page) == 0 {
+			// A server handing out cursors without files would spin forever.
+			return raws, files, cursor, nil
+		}
+	}
+	return raws, files, cursor, nil
+}
+
 // WalkFiles follows next_cursor until exhausted and visits each decoded page.
 func (c *Client) WalkFiles(ctx context.Context, visit func([]json.RawMessage, []File) error) error {
-	cursor := ""
+	return c.WalkFilesFrom(ctx, "", visit)
+}
+
+// WalkFilesFrom is WalkFiles starting at an existing cursor.
+func (c *Client) WalkFilesFrom(ctx context.Context, cursor string, visit func([]json.RawMessage, []File) error) error {
 	seen := map[string]struct{}{}
 	for {
 		res, err := c.ListFiles(ctx, cursor, 0)

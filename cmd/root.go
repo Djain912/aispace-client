@@ -35,6 +35,10 @@ const (
 // sleep is used by the API client when retrying rate-limited GETs; tests override it.
 var sleep func(time.Duration)
 
+// inactivityTimeout overrides the client's transfer stall timeout. Zero keeps
+// the client default; tests shorten it so a stall is reachable in a test.
+var inactivityTimeout time.Duration
+
 // app carries global flag state and IO for one invocation.
 type app struct {
 	version string
@@ -165,7 +169,12 @@ func (a *app) newRootCmd() *cobra.Command {
 		a.quotaCmd(),
 		a.whoamiCmd(),
 		a.versionCmd(),
+		a.completionCmd(),
 	)
+	// Replace cobra's generated completion command with one that can also
+	// install the script. The hidden __complete command it relies on is
+	// unaffected, so dynamic completion keeps working.
+	root.CompletionOptions.DisableDefaultCmd = true
 	return root
 }
 
@@ -239,6 +248,9 @@ func (a *app) client() (*api.Client, error) {
 	}
 	c := api.New(cfg.URL, cfg.Key, a.userAgent())
 	c.Sleep = sleep
+	if inactivityTimeout > 0 {
+		c.InactivityTimeout = inactivityTimeout
+	}
 	return c, nil
 }
 
@@ -302,6 +314,14 @@ func validateKey(key string) error {
 func (a *app) classify(err error) (int, string) {
 	if errors.Is(err, context.Canceled) {
 		return ExitGeneric, "interrupted"
+	}
+	// A stall is checked before codedError for the same reason cancellation is:
+	// a command that hit it while writing its output wraps it as an I/O
+	// failure, and "io" hides the one thing the caller needs to know. The
+	// client reports "timeout" when a transfer stalls before the body starts,
+	// so a stall during the body must not be coded differently.
+	if errors.Is(err, api.ErrTransferStalled) {
+		return ExitGeneric, "timeout"
 	}
 	var ue *usageError
 	if errors.As(err, &ue) {
