@@ -119,9 +119,9 @@ retried automatically; the agent decides. `Retry-After` is echoed in the error m
 ## Timeouts
 
 There is **no deadline on a transfer as a whole**. A large file over a slow link is slow, not
-broken, and a single cap covering the response body would really be a bandwidth floor: at a
-ten-minute cap, a 100 MB upload has to sustain about 1.4 Mbit/s or fail after moving most of
-itself.
+broken. Instead, uploads and downloads have a two-minute inactivity timeout that resets whenever
+body bytes move. A transfer can run for hours while making progress, but a connected peer that
+stops moving data does not hold an unattended process forever.
 
 What is bounded are the phases before any bytes flow, so an unreachable or silent server is still
 given up on quickly:
@@ -131,9 +131,11 @@ given up on quickly:
 | TCP connect | 30s |
 | TLS handshake | 10s |
 | Waiting for response headers | 60s |
+| Upload/download with no byte progress | 2m |
 
-A stalled transfer is therefore ended by the peer or by the operator, not by a timer:
-`Ctrl-C`/`SIGTERM` cancels in-flight requests and exits `1` with code `interrupted`.
+`Ctrl-C`/`SIGTERM` cancels in-flight requests, closes stdin to unblock ordinary pipes, and exits `1`
+with code `interrupted`. After the first signal, default handling is restored so a second interrupt
+can terminate a source that cannot be closed cleanly.
 
 ## Durations
 

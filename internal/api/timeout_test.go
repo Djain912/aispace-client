@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -121,5 +123,65 @@ func TestNewUsesTheSharedClient(t *testing.T) {
 	c := New("https://example.test", "ask_x", "ua")
 	if c.HTTP == nil || c.HTTP.Timeout != 0 {
 		t.Fatalf("client HTTP = %+v, want the shared no-total-deadline client", c.HTTP)
+	}
+	if c.InactivityTimeout != TransferInactivityTimeout {
+		t.Fatalf("inactivity timeout = %v, want %v", c.InactivityTimeout, TransferInactivityTimeout)
+	}
+}
+
+func TestSlowProgressResetsDownloadInactivityTimeout(t *testing.T) {
+	srv := trickle(t, 6, 40*time.Millisecond)
+	c := New(srv.URL, "ask_test", "test")
+	c.InactivityTimeout = 70 * time.Millisecond
+
+	resp, err := c.Download(context.Background(), "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if body, err := io.ReadAll(resp.Body); err != nil || len(body) != 30 {
+		t.Fatalf("body length = %d, err = %v", len(body), err)
+	}
+}
+
+func TestStalledDownloadBodyTimesOut(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "ask_test", "test")
+	c.InactivityTimeout = 50 * time.Millisecond
+
+	resp, err := c.Download(context.Background(), "file")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	_, err = io.ReadAll(resp.Body)
+	if !errors.Is(err, ErrTransferStalled) {
+		t.Fatalf("error = %v, want ErrTransferStalled", err)
+	}
+}
+
+func TestStalledUploadResponseBodyTimesOut(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusCreated)
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "ask_test", "test")
+	c.InactivityTimeout = 50 * time.Millisecond
+
+	_, err := c.Upload(context.Background(), strings.NewReader("payload"), UploadOptions{Size: 7})
+	if !errors.Is(err, ErrTransferStalled) {
+		t.Fatalf("error = %v, want ErrTransferStalled", err)
 	}
 }

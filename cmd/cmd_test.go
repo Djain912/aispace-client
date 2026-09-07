@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +24,15 @@ import (
 
 	"github.com/aispace-sh/aispace-client/internal/config"
 )
+
+func TestCancellationWinsOverWrappedLocalError(t *testing.T) {
+	a := &app{}
+	err := &codedError{code: "io", err: fmt.Errorf("read stdin: %w", context.Canceled), exit: ExitGeneric}
+	exit, code := a.classify(err)
+	if exit != ExitGeneric || code != "interrupted" {
+		t.Fatalf("classify = (%d, %q), want (%d, interrupted)", exit, code, ExitGeneric)
+	}
+}
 
 // fakeServer is a minimal in-memory aispace /v1 implementation.
 type fakeServer struct {
