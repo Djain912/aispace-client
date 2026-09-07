@@ -85,6 +85,19 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, version strin
 	root.SetErr(stderr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := executeCommand(root, ctx, stdin, stop)
+	if err == nil {
+		return ExitOK
+	}
+	code, apiCode := a.classify(err)
+	var reported *reportedError
+	if !errors.As(err, &reported) {
+		a.printError(err, apiCode)
+	}
+	return code
+}
+
+func executeCommand(root *cobra.Command, ctx context.Context, stdin io.Reader, stop func()) error {
 	executionDone := make(chan struct{})
 	watcherDone := make(chan struct{})
 	go func() {
@@ -104,16 +117,12 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, version strin
 	err := root.ExecuteContext(ctx)
 	close(executionDone)
 	<-watcherDone
+	interrupted := ctx.Err() != nil
 	stop()
-	if err == nil {
-		return ExitOK
+	if interrupted {
+		return context.Canceled
 	}
-	code, apiCode := a.classify(err)
-	var reported *reportedError
-	if !errors.As(err, &reported) {
-		a.printError(err, apiCode)
-	}
-	return code
+	return err
 }
 
 func (a *app) newRootCmd() *cobra.Command {

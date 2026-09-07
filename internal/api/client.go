@@ -139,7 +139,7 @@ func (c *Client) Upload(ctx context.Context, body io.Reader, opts UploadOptions)
 	if opts.Visibility != "" {
 		req.Header.Set("X-File-Visibility", opts.Visibility)
 	}
-	res, err := do[File](c, req, http.StatusCreated)
+	res, err := doRequest[File](c, req, http.StatusCreated, watch)
 	if errors.Is(context.Cause(transferCtx), ErrTransferStalled) {
 		return Result[File]{}, stalledError()
 	}
@@ -170,6 +170,7 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 		}
 		if resp.StatusCode == http.StatusOK {
 			if watch != nil {
+				watch.touch()
 				resp.Body = &watchedBody{ReadCloser: resp.Body, ctx: transferCtx, watch: watch}
 			}
 			return resp, nil
@@ -373,11 +374,15 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 
 // do executes the request, retrying GET requests once on temporary rate limits.
 func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) {
+	return doRequest[T](c, req, wantStatus, nil)
+}
+
+func doRequest[T any](c *Client, req *http.Request, wantStatus int, watch *transferWatch) (Result[T], error) {
 	httpc := c.HTTP
 	if httpc == nil {
 		httpc = http.DefaultClient
 	}
-	resp, body, err := send(httpc, req)
+	resp, body, err := send(httpc, req, watch)
 	if err != nil {
 		return Result[T]{}, err
 	}
@@ -387,7 +392,7 @@ func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) 
 			return Result[T]{}, err
 		}
 		retry := req.Clone(req.Context())
-		resp, body, err = send(httpc, retry)
+		resp, body, err = send(httpc, retry, watch)
 		if err != nil {
 			return Result[T]{}, err
 		}
@@ -444,10 +449,14 @@ func waitForRetry(ctx context.Context, delay time.Duration, sleep func(time.Dura
 	}
 }
 
-func send(httpc *http.Client, req *http.Request) (*http.Response, []byte, error) {
+func send(httpc *http.Client, req *http.Request, watch *transferWatch) (*http.Response, []byte, error) {
 	resp, err := httpc.Do(req)
 	if err != nil {
 		return nil, nil, networkError(err)
+	}
+	if watch != nil {
+		watch.touch()
+		resp.Body = &watchedBody{ReadCloser: resp.Body, ctx: req.Context(), watch: watch}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

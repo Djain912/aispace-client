@@ -185,3 +185,48 @@ func TestStalledUploadResponseBodyTimesOut(t *testing.T) {
 		t.Fatalf("error = %v, want ErrTransferStalled", err)
 	}
 }
+
+func TestUploadWatchStartsWhenBodyTransferStarts(t *testing.T) {
+	c := New("https://example.test", "ask_test", "test")
+	c.InactivityTimeout = 25 * time.Millisecond
+	c.HTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		time.Sleep(60 * time.Millisecond)
+		if _, err := io.ReadAll(req.Body); err != nil {
+			return nil, err
+		}
+		body := `{"id":"01FILE","name":"payload","content_type":"application/octet-stream","size_bytes":7,"visibility":"private","created_at":1,"expires_at":2}`
+		return &http.Response{StatusCode: http.StatusCreated, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+
+	res, err := c.Upload(context.Background(), strings.NewReader("payload"), UploadOptions{Size: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Value.ID != "01FILE" {
+		t.Fatalf("file ID = %q, want 01FILE", res.Value.ID)
+	}
+}
+
+func TestCompletedTransferCannotBecomeStalledLater(t *testing.T) {
+	ctx, watch := startTransferWatch(context.Background(), 20*time.Millisecond)
+	body := &watchedBody{
+		ReadCloser: io.NopCloser(strings.NewReader("complete")),
+		ctx:        ctx,
+		watch:      watch,
+	}
+	watch.touch()
+	if _, err := io.ReadAll(body); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if cause := context.Cause(ctx); cause != nil {
+		t.Fatalf("completed transfer cause = %v, want nil", cause)
+	}
+	if err := body.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }

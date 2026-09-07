@@ -17,6 +17,7 @@ type transferWatch struct {
 	timeout time.Duration
 	timer   *time.Timer
 	cancel  context.CancelCauseFunc
+	active  bool
 	stopped bool
 }
 
@@ -26,7 +27,6 @@ func startTransferWatch(parent context.Context, timeout time.Duration) (context.
 	}
 	ctx, cancel := context.WithCancelCause(parent)
 	w := &transferWatch{timeout: timeout, cancel: cancel}
-	w.timer = time.AfterFunc(timeout, func() { cancel(ErrTransferStalled) })
 	return ctx, w
 }
 
@@ -36,8 +36,36 @@ func (w *transferWatch) touch() {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if !w.stopped {
+	if w.stopped {
+		return
+	}
+	w.active = true
+	if w.timer == nil {
+		w.timer = time.AfterFunc(w.timeout, w.expire)
+	} else {
+		w.timer.Stop()
 		w.timer.Reset(w.timeout)
+	}
+}
+
+func (w *transferWatch) pause() {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	w.active = false
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+	w.mu.Unlock()
+}
+
+func (w *transferWatch) expire() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.stopped && w.active {
+		w.active = false
+		w.cancel(ErrTransferStalled)
 	}
 }
 
@@ -48,7 +76,10 @@ func (w *transferWatch) stop() {
 	w.mu.Lock()
 	if !w.stopped {
 		w.stopped = true
-		w.timer.Stop()
+		w.active = false
+		if w.timer != nil {
+			w.timer.Stop()
+		}
 		w.cancel(nil)
 	}
 	w.mu.Unlock()
@@ -64,6 +95,9 @@ func (r *progressReader) Read(p []byte) (int, error) {
 	if n > 0 {
 		r.watch.touch()
 	}
+	if err != nil {
+		r.watch.pause()
+	}
 	return n, err
 }
 
@@ -78,8 +112,11 @@ func (b *watchedBody) Read(p []byte) (int, error) {
 	if n > 0 {
 		b.watch.touch()
 	}
-	if err != nil && errors.Is(context.Cause(b.ctx), ErrTransferStalled) {
-		return n, ErrTransferStalled
+	if err != nil {
+		b.watch.pause()
+		if errors.Is(context.Cause(b.ctx), ErrTransferStalled) {
+			return n, ErrTransferStalled
+		}
 	}
 	return n, err
 }
