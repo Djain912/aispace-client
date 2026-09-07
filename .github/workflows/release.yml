@@ -7,6 +7,11 @@ on:
         description: Release version without the v prefix (for example, 0.1.0)
         required: true
         type: string
+      resume:
+        description: Resume this version after a failed partial release
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
       sha: ${{ steps.release.outputs.sha }}
+      tag_exists: ${{ steps.release.outputs.tag_exists }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -31,6 +37,7 @@ jobs:
         id: release
         env:
           VERSION_INPUT: ${{ inputs.version }}
+          RESUME: ${{ inputs.resume }}
         run: |
           VERSION="${VERSION_INPUT#v}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -42,14 +49,25 @@ jobs:
             exit 1
           fi
           TAG="v$VERSION"
+          TAG_EXISTS=false
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "tag $TAG already exists" >&2
-            exit 1
+            if [ "$RESUME" != "true" ]; then
+              echo "tag $TAG already exists; select resume only to recover that exact release" >&2
+              exit 1
+            fi
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            HEAD_SHA="$(git rev-parse HEAD)"
+            if [ "$TAG_SHA" != "$HEAD_SHA" ]; then
+              echo "tag $TAG points to $TAG_SHA, not current main $HEAD_SHA" >&2
+              exit 1
+            fi
+            TAG_EXISTS=true
           fi
           {
             echo "version=$VERSION"
             echo "tag=$TAG"
             echo "sha=$(git rev-parse HEAD)"
+            echo "tag_exists=$TAG_EXISTS"
           } >> "$GITHUB_OUTPUT"
 
   credentials:
@@ -137,6 +155,7 @@ jobs:
           go-version: '1.26.6'
           cache-dependency-path: go.sum
       - name: Create release tag
+        if: needs.validate.outputs.tag_exists != 'true'
         env:
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
@@ -144,7 +163,24 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "refs/tags/$TAG"
+      - name: Inspect previous release attempt
+        id: release_state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          PUBLISH=true
+          DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          if [ "$DRAFT" = "true" ]; then
+            echo "removing incomplete draft release $TAG before retry"
+            gh release delete "$TAG" --yes
+          elif [ "$DRAFT" = "false" ]; then
+            echo "published release $TAG already exists; preserving its immutable assets"
+            PUBLISH=false
+          fi
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        if: steps.release_state.outputs.publish == 'true'
         with:
           distribution: goreleaser
           version: '~> v2'
@@ -157,6 +193,26 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
         run: gh release upload "$TAG" install.sh --clobber
+      - name: Verify release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for NAME in checksums.txt install.sh \
+            aispace_darwin_amd64 aispace_darwin_arm64 \
+            aispace_linux_amd64 aispace_linux_arm64 \
+            aispace_windows_amd64.exe aispace_windows_arm64.exe
+          do
+            grep -Fx "$NAME" <<<"$ASSETS" >/dev/null || { echo "release asset missing: $NAME" >&2; exit 1; }
+          done
+      - name: Verify Homebrew cask version
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          gh api repos/aispace-sh/homebrew-tap/contents/Casks/aispace.rb --jq .content \
+            | base64 --decode | grep -F "version \"$VERSION\"" >/dev/null
 
   npm:
     name: Publish npm package
@@ -179,7 +235,20 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
         run: npm version "$VERSION" --no-git-tag-version
+      - name: Check for an existing npm publication
+        id: npm_state
+        working-directory: npm
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          if npm view "@aispace-sh/cli@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "@aispace-sh/cli@$VERSION is already published; preserving it"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish package
+        if: steps.npm_state.outputs.published != 'true'
         working-directory: npm
         run: npm publish --access public
         env:
