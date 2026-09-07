@@ -19,7 +19,6 @@
   <a href="https://github.com/aispace-sh/aispace-client/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aispace-sh/aispace-client/ci.yml?branch=main&style=flat-square&label=Go%20CI" alt="Go CI"></a>
   <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.26+">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
-  <a href="https://goreportcard.com/report/github.com/aispace-sh/aispace-client"><img src="https://goreportcard.com/badge/github.com/aispace-sh/aispace-client?style=flat-square" alt="Go Report Card"></a>
 </p>
 
 <p align="center">
