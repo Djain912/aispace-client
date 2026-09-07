@@ -25,9 +25,12 @@ long or too structured for chat (reports, tables, code bundles, images).
   free plan and 30 days on Pro. Never promise permanence.
 - Before uploading anything large, or before a batch of uploads, run `aispace quota --json` and
   check `.limits.max_file_bytes`, `.key.remaining_bytes`, `.account.remaining_bytes` and the
-  monthly counters `.month.uploads_used` / `.month.uploads_limit`.
-- Exit codes: 4 = storage quota exceeded (tell the user, do not retry), 5 = rate limited or the
-  monthly cap is used up, 3 = key problem (stop and tell the user).
+  short-window counters `.rate.uploads_hour_remaining` / `.rate.uploads_day_remaining`.
+- The account-wide monthly cap is not reported by `quota`; it appears only as a `429` with code
+  `monthly_upload_cap` or `monthly_download_cap` when you hit it.
+- Exit codes: 2 = bad input, fix the arguments and do not retry unchanged; 3 = key problem (stop
+  and tell the user); 4 = storage quota exceeded (tell the user, do not retry); 5 = rate limited
+  or the monthly cap is used up.
 - If the error code is `monthly_upload_cap` or `monthly_download_cap` the account is out of
   requests for the whole calendar month: do NOT retry or wait, tell the user the cap is reached
   and that they can upgrade in the dashboard or mail contacts@aispace.sh.
@@ -222,7 +225,7 @@ still works until it expires or the agent runs `aispace revoke`.
 | Result the user will open right now | 1d | 15m–1h | 1–3 |
 | Report for a meeting later today | 3d | 8h | none |
 | Handoff to a third party by email | 7d (default) | 24h | 1 per recipient (mint one link each) |
-| Log bundle for a support ticket | 7d | 7d (the free-plan max; 30d on paid) | none |
+| Log bundle for a support ticket | 7d | 7d (links are Pro-only; capped at 30d and never past the file's expiry) | none |
 | Anything containing PII or credentials-adjacent data | 1d | 15m | 1 |
 | Intermediate artefact between two agents | 1h | 15m | 1 |
 
@@ -256,23 +259,24 @@ aispace quota --json | jq -e --argjson n "$need" '
   .limits.max_file_bytes >= $n
   and .key.remaining_bytes >= $n
   and .account.remaining_bytes >= $n
-  and (.month.uploads_limit - .month.uploads_used) > 0
   and .rate.uploads_hour_remaining > 0
   and .rate.uploads_day_remaining > 0' >/dev/null || { echo "cannot upload $need bytes now"; aispace quota; exit 4; }
 ```
 
-Before a **batch** of N uploads, check the count and the total bytes in one go — the monthly cap
-is account-wide (shared by every key), so a batch that fits in storage can still exhaust the
-month:
+Before a **batch** of N uploads, check the daily upload count and the total bytes in one go:
 
 ```sh
 n=250; total=52428800   # 250 files, 50 MB together
 aispace quota --json | jq -e --argjson n "$n" --argjson t "$total" '
-  (.month.uploads_limit - .month.uploads_used) >= $n
-  and .key.remaining_bytes >= $t
-  and .account.remaining_bytes >= $t' >/dev/null || {
+  .key.remaining_bytes >= $t
+  and .account.remaining_bytes >= $t
+  and .rate.uploads_day_remaining >= $n' >/dev/null || {
     echo "batch of $n would exceed a cap; see aispace quota"; exit 4; }
 ```
+
+The monthly cap cannot be pre-checked, so a batch that clears this check can still stop partway
+with `429 monthly_upload_cap`. Treat that as terminal for the month rather than retrying, and
+report how many of the N uploads completed.
 
 If the batch does not fit, prefer **one archive over many files** (`tar czf - dir | aispace upload
 - --name out.tgz`): it costs a single upload against the monthly cap instead of N. That is usually
@@ -288,7 +292,7 @@ What to tell the user for each failing term:
 | `limits.max_file_bytes < need` | File is over the per-file cap (5 MB on Free, 100 MB on Pro). Split it, compress it, or ask the human to upgrade. |
 | `key.remaining_bytes < need` | This key's budget is full. Delete old files (`aispace ls`, `aispace rm`) or ask the human to raise the budget in the dashboard. |
 | `account.remaining_bytes < need` | The account is at its storage allowance (10 MB on Free, 10 GB per Pro block). The human can free space or add a block. |
-| `month.uploads_used >= month.uploads_limit` | The account's monthly upload cap is used up (100 on Free, 10,000 per Pro block). Nothing will upload until `month.period_end`; tell the human to upgrade or mail contacts@aispace.sh. |
+| `429 monthly_upload_cap` (not pre-checkable) | The account's monthly upload cap is used up (100 on Free, 10,000 per Pro block). Nothing will upload until the next UTC month; tell the human to upgrade or mail contacts@aispace.sh. |
 | `rate.uploads_hour_remaining == 0` | Rate limited; wait until the top of the hour or batch outputs into one archive. |
 
 Every `/v1` response also carries `X-Quota-Remaining` (bytes left on the key), so a client that
