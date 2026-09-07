@@ -190,33 +190,49 @@ func (a *app) linkCmd() *cobra.Command {
 
 func (a *app) lsCmd() *cobra.Command {
 	var all bool
+	var limit int
+	var cursor string
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List files uploaded with this key (all pages)",
-		Long:  "Lists every file for the key, following pagination. Human output is one line per file:\n<id> <size> <expires> <name>. With --json prints {\"files\": [...], \"next_cursor\": null} merged across pages.",
-		Args:  noArgs,
+		Use:   "ls [--limit N] [--cursor C]",
+		Short: "List files uploaded with this key",
+		Long: "Lists files for the key. By default it follows pagination to the end. Human output\n" +
+			"is one line per file: <id> <size> <expires> <name>.\n\n" +
+			"--limit stops after N files instead of walking the whole account, which costs\n" +
+			"fewer requests on a large one. When more files remain, --json reports the cursor\n" +
+			"to resume from in next_cursor; pass it back with --cursor to continue.",
+		Example: "  aispace ls --limit 50 --json\n" +
+			"  aispace ls --limit 50 --cursor \"$(aispace ls --limit 50 --json | jq -r .next_cursor)\" --json",
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if limit < 0 {
+				return usagef("--limit must be >= 0")
+			}
 			c, err := a.client()
 			if err != nil {
 				return err
 			}
-			if a.jsonOut {
-				raws, _, err := c.ListAllFiles(cmd.Context())
+			if limit > 0 {
+				raws, files, next, err := c.ListPage(cmd.Context(), cursor, limit)
 				if err != nil {
 					return err
 				}
-				if raws == nil {
-					raws = []json.RawMessage{}
+				return a.printFileList(raws, files, next)
+			}
+			if a.jsonOut {
+				var raws []json.RawMessage
+				err := c.WalkFilesFrom(cmd.Context(), cursor, func(page []json.RawMessage, _ []api.File) error {
+					raws = append(raws, page...)
+					return nil
+				})
+				if err != nil {
+					return err
 				}
-				return a.printJSONValue(struct {
-					Files      []json.RawMessage `json:"files"`
-					NextCursor *string           `json:"next_cursor"`
-				}{Files: raws})
+				return a.printFileList(raws, nil, "")
 			}
 			count := 0
-			err = c.WalkFiles(cmd.Context(), func(_ []json.RawMessage, files []api.File) error {
+			err = c.WalkFilesFrom(cmd.Context(), cursor, func(_ []json.RawMessage, files []api.File) error {
 				for _, f := range files {
-					fmt.Fprintf(a.stdout, "%s %s %s %s\n", f.ID, fmtBytes(f.SizeBytes), fmtTime(f.ExpiresAt), f.Name)
+					a.printListLine(f)
 					count++
 				}
 				return nil
@@ -230,8 +246,44 @@ func (a *app) lsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&all, "all", false, "accepted for compatibility; ls always follows pagination to the end")
+	cmd.Flags().BoolVar(&all, "all", false, "accepted for compatibility; ls follows pagination to the end unless --limit is given")
+	cmd.Flags().IntVar(&limit, "limit", 0, "stop after N files instead of listing the whole account")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from a next_cursor returned by an earlier --limit run")
 	return cmd
+}
+
+// printFileList renders a listing in whichever mode is active. next is the
+// cursor to resume from, empty when the listing reached the end.
+func (a *app) printFileList(raws []json.RawMessage, files []api.File, next string) error {
+	if a.jsonOut {
+		if raws == nil {
+			raws = []json.RawMessage{}
+		}
+		var cursor *string
+		if next != "" {
+			cursor = &next
+		}
+		return a.printJSONValue(struct {
+			Files      []json.RawMessage `json:"files"`
+			NextCursor *string           `json:"next_cursor"`
+		}{Files: raws, NextCursor: cursor})
+	}
+	for _, f := range files {
+		a.printListLine(f)
+	}
+	if len(files) == 0 {
+		fmt.Fprintln(a.stderr, "no files")
+	}
+	if next != "" {
+		// stderr, so stdout stays one line per file for a pipeline.
+		fmt.Fprintf(a.stderr, "more files remain; continue with --cursor %s\n", next)
+	}
+	return nil
+}
+
+// printListLine renders one ls row.
+func (a *app) printListLine(f api.File) {
+	fmt.Fprintf(a.stdout, "%s %s %s %s\n", f.ID, fmtBytes(f.SizeBytes), fmtTime(f.ExpiresAt), f.Name)
 }
 
 func (a *app) infoCmd() *cobra.Command {

@@ -360,10 +360,10 @@ Exit 1 with `not_found` if the file is unknown to this key or already expired.
 ### `aispace ls`
 
 ```
-aispace ls [--all] [--json]
+aispace ls [--limit N] [--cursor C] [--all] [--json]
 ```
 
-Lists this key's live files (`GET /v1/files`). It **always** follows `next_cursor` to the end, in
+Lists this key's live files (`GET /v1/files`). By default it follows `next_cursor` to the end, in
 both human and `--json` mode. `--all` is accepted for compatibility and does nothing.
 
 Human output is one line per file, `<id> <size> <expires> <name>`, with no header:
@@ -375,7 +375,7 @@ Human output is one line per file, `<id> <size> <expires> <name>`, with no heade
 
 When the key holds no files, nothing is written to stdout and `no files` goes to stderr, so a
 `--json`-free pipeline stays empty. `--json` prints every page merged into one object, with
-`next_cursor` always `null` because the walk is already finished:
+`next_cursor` `null` because the walk is already finished:
 
 ```sh
 # total bytes held by this key
@@ -383,6 +383,39 @@ aispace ls --json | jq '[.files[].size_bytes] | add'
 
 # files expiring within 24 h
 aispace ls --json | jq -r --argjson t "$(date +%s)" '.files[] | select(.expires_at - $t < 86400) | .name'
+```
+
+#### Paging a large account
+
+Walking to the end costs one request per page, which is wasteful when only the first few files are
+wanted. `--limit N` stops after N files instead:
+
+```sh
+aispace ls --limit 50 --json
+```
+
+Each request asks for exactly the number still wanted, so `next_cursor` stays aligned with what was
+consumed — it is the resume point, not the end of the last page. Pass it back with `--cursor` to
+continue, and it is `null` once the listing is exhausted:
+
+```sh
+cursor=""
+while :; do
+  page=$(aispace ls --limit 100 ${cursor:+--cursor "$cursor"} --json)
+  echo "$page" | jq -r '.files[].id'
+  cursor=$(echo "$page" | jq -r '.next_cursor // empty')
+  [ -n "$cursor" ] || break
+done
+```
+
+Resuming is exact: no file is skipped and none is returned twice. In human mode stdout stays one
+line per file and the resume hint goes to stderr, so a pipeline is unaffected:
+
+```
+$ aispace ls --limit 3
+01J8ZQ3V9N7X2K4M6P8R0T2W4Y 1.0 MB 2026-09-12T17:00:00Z report.pdf
+...
+more files remain; continue with --cursor 3        # stderr
 ```
 
 ### `aispace rm`
