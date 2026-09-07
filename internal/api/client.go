@@ -155,7 +155,11 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 		if readErr != nil {
 			return nil, &Error{Code: "network", Message: "reading response: " + readErr.Error(), cause: readErr}
 		}
-		if attempt == 0 && retryableOnce(resp, body) {
+		// Authenticated downloads consume monthly allowance. A gateway error may
+		// arrive after the server recorded that download, so replaying it could
+		// charge the account twice. A rate-limit rejection happens before the
+		// download handler and remains safe to retry.
+		if attempt == 0 && retryableRateLimit(resp, body) {
 			if err := waitForRetry(req.Context(), retryDelay(resp.Header.Get("Retry-After")), c.Sleep); err != nil {
 				return nil, err
 			}
@@ -418,13 +422,18 @@ func send(httpc *http.Client, req *http.Request) (*http.Response, []byte, error)
 // means the request itself is the problem, and retrying only doubles the load
 // while returning the same error.
 func retryableOnce(resp *http.Response, body []byte) bool {
+	if retryableRateLimit(resp, body) {
+		return true
+	}
 	switch resp.StatusCode {
-	case http.StatusTooManyRequests:
-		return errorFromResponse(resp, body).Code == "rate_limited"
 	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return true
 	}
 	return false
+}
+
+func retryableRateLimit(resp *http.Response, body []byte) bool {
+	return resp.StatusCode == http.StatusTooManyRequests && errorFromResponse(resp, body).Code == "rate_limited"
 }
 
 func networkError(err error) *Error {

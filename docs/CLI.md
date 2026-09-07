@@ -100,12 +100,13 @@ the API's code and message together with the exit code, so a caller can branch o
 | `4` | Quota | `402 quota_exceeded`, `402 allowance_exceeded`, `402 payment_required`, `413 file_too_large` |
 | `5` | Rate limited or monthly cap | `429 rate_limited` after the retry policy below gave up; `429 monthly_upload_cap` / `429 monthly_download_cap` (never retried — the reset is next month) |
 
-Retry policy: the CLI retries **once**, and only for idempotent `GET`s (`ls`, `quota`, `download`
-and the metadata lookups), on either of two conditions:
+Retry policy: the CLI retries **once** on either of two conditions:
 
-- `429 rate_limited`, waiting the `Retry-After` the server gives (capped at 30s).
-- `502`, `503` or `504` — the availability answers a gateway returns while it is between healthy
-  backends. A `GET` that failed that way changed nothing, so repeating it is safe.
+- `429 rate_limited` for idempotent `GET`s (`ls`, `quota`, `download` and metadata lookups), waiting
+  the `Retry-After` the server gives (capped at 30s).
+- `502`, `503` or `504` for non-metered metadata `GET`s. The CLI does not replay authenticated
+  downloads after a gateway error because each request consumes monthly download allowance and the
+  first attempt may already have been counted.
 
 `500` is **not** retried: it usually means the request itself is the problem, so a second attempt
 doubles the load and returns the same error. Writes are never retried either — a `503` may still

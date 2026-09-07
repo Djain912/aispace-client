@@ -108,16 +108,17 @@ func TestInternalServerErrorIsNotRetried(t *testing.T) {
 	}
 }
 
-// Download streams its body separately from do(), so it needs its own coverage.
-func TestTransientServerErrorIsRetriedOnDownload(t *testing.T) {
+// Authenticated downloads consume monthly allowance. A gateway error may
+// arrive after the server counted the request, so replaying it could charge the
+// account twice.
+func TestTransientServerErrorIsNotRetriedOnDownload(t *testing.T) {
 	f := newFlakyServer(t, http.StatusBadGateway, 1)
-	resp, err := flakyClient(f).Download(context.Background(), "01A")
-	if err != nil {
-		t.Fatalf("expected the retry to succeed: %v", err)
+	_, err := flakyClient(f).Download(context.Background(), "01A")
+	if err == nil {
+		t.Fatal("expected the gateway error to surface")
 	}
-	defer resp.Body.Close()
-	if n := f.count(); n != 2 {
-		t.Fatalf("attempts = %d, want 2", n)
+	if n := f.count(); n != 1 {
+		t.Fatalf("attempts = %d, want 1; a metered download must not be replayed", n)
 	}
 }
 
