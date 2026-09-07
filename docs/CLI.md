@@ -29,7 +29,7 @@ Resolution order (first match wins):
 
 | Source | Key | URL |
 |---|---|---|
-| Flag | `--key` (login only) | `--url` |
+| Flag | `--key` | `--url` |
 | Environment | `AISPACE_KEY` | `AISPACE_URL` |
 | Config file | `~/.config/aispace/config.json` → `key` | → `url` |
 | Default | — | `https://aispace.sh` |
@@ -48,21 +48,36 @@ environments (CI, agent sandboxes) can skip `login` entirely and export `AISPACE
 | `AISPACE_KEY` | Bot key; overrides the config file |
 | `AISPACE_URL` | Base URL; overrides the config file (self-hosted or `http://localhost:8787`) |
 | `AISPACE_AGE_IDENTITY` | Secret age X25519 identity used by `decrypt` when `--identity-file` is omitted |
+| `AISPACE_CONFIG` | Full path to the config file, overriding the `XDG_CONFIG_HOME`/`HOME` lookup |
 | `AISPACE_INSTALL_DIR` | Installer only: destination directory |
-| `NO_COLOR` | Disable ANSI colour in human output |
 
 ## Global flags
 
 | Flag | Meaning |
 |---|---|
-| `--json` | Print the exact API JSON response (or `{}` for `204`) and nothing else on stdout |
+| `--json` | Print the exact API JSON response and nothing else on stdout |
+| `--key <ask_...>` | Override the key for this invocation |
 | `--url <base>` | Override base URL for this invocation |
-| `-q, --quiet` | Suppress human-readable progress on stderr |
 | `-h, --help` | Help |
 
-Human-readable output goes to **stdout**; progress and warnings go to **stderr**; errors go to
-**stderr** as a single line `error: <code>: <message>`. In `--json` mode errors are printed to
-stderr as the API's JSON error object, and stdout stays empty.
+`--json`, `--key` and `--url` are persistent flags, so they work on every subcommand — `--key` is
+not limited to `login`.
+
+Human-readable output goes to **stdout**; warnings go to **stderr**; errors go to **stderr** as a
+single line `error: <message> (<code>)`:
+
+```
+error: Invalid key (invalid_key)
+```
+
+In `--json` mode stdout stays empty and the error is written to stderr as one object that wraps
+the API's code and message together with the exit code, so a caller can branch on either:
+
+```json
+{"error":{"code":"invalid_key","exit_code":3,"message":"Invalid key","status":401}}
+```
+
+`details` and `retry_after` are included when the server supplies them.
 
 ## Exit codes
 
@@ -72,7 +87,7 @@ stderr as the API's JSON error object, and stdout stays empty.
 | `1` | Generic failure | Network error, 5xx, unexpected response, file not found locally |
 | `2` | Usage error | Bad flag, missing argument, unparsable duration |
 | `3` | Authentication | No key configured, `401 invalid_key`, `401 key_revoked` |
-| `4` | Quota | `402 quota_exceeded`, `402 allowance_exceeded`, `402 payment_required`, `400/413 file_too_large` |
+| `4` | Quota | `402 quota_exceeded`, `402 allowance_exceeded`, `402 payment_required`, `413 file_too_large` |
 | `5` | Rate limited or monthly cap | `429 rate_limited` after the retry policy below gave up; `429 monthly_upload_cap` / `429 monthly_download_cap` (never retried — the reset is next month) |
 
 Retry policy: on `429 rate_limited` the CLI reads `Retry-After` and retries **once**, only for
@@ -101,13 +116,16 @@ prefix and the account email.
 
 ```sh
 $ aispace login --key ask_9fK2mQ1xAbCdEfGhIjKlMnOpQrStUvWx
-logged in as research-bot (ask_9fK2mQ1x…) for luigi@example.com at https://aispace.sh
+logged in as key "research-bot" (ask_9fK2mQ1x) for luigi@example.com
+saved /home/you/.config/aispace/config.json
 ```
+
+The URL is only written to the config file when it differs from the default `https://aispace.sh`.
 
 | Exit | When |
 |---|---|
 | 3 | key rejected |
-| 2 | `--key` missing or not of the form `ask_` + 32 base62 chars |
+| 2 | `--key` missing (and `AISPACE_KEY` unset), or the key does not start with `ask_` |
 
 ### `aispace upload`
 
@@ -122,11 +140,11 @@ Uploads one file with `POST /v1/files` (raw streamed body). `-` reads stdin.
 
 | Flag | Default | Notes |
 |---|---|---|
-| `--name N` | basename of `<path>`; **required** with `-` | Sent as `X-File-Name` |
+| `--name N` | basename of `<path>`, or `stdin` for `-` | Sent as `X-File-Name` |
 | `--expires D` | server default (7d) | File lifetime, `X-Expires-In`; max 30d |
 | `--link` | off | After upload, also create a Pro public share link and print its URL |
-| `--link-expires D` | 1h | Link lifetime (implies `--link`) |
-| `--max-downloads N` | unlimited | Link download cap (implies `--link`) |
+| `--link-expires D` | server default (1h) | Link lifetime; **requires** `--link`, exit 2 without it |
+| `--max-downloads N` | unlimited | Link download cap; **requires** `--link`, exit 2 without it |
 | `--content-type T` | sniffed from extension, else `application/octet-stream` | Stored type |
 | `--sha256` | off | Compute SHA-256 locally and send `X-SHA256` so R2 verifies the body |
 | `--private` | account setting | Restrict this upload to the current key |
@@ -165,12 +183,16 @@ not supplied, the command generates a one-time identity. Losing that identity ma
 unrecoverable. Anyone who has both ciphertext and the identity can decrypt it even after a link
 is revoked, so deliver them through separate channels when practical.
 
-Human output (one line per object):
+Human output (one line per object). With `--link` the URL is printed **last, on its own line**, so
+an agent can take the final line of stdout:
 
 ```
-uploaded hello.txt (6 B) id=01J8ZQ3V9N7X2K4M6P8R0T2W4Y expires 2026-09-12T17:00:00Z
-link https://aispace.sh/d/K3f9Qm2xP7vL1nR8sT4wY6zA0bC5dE9fG3hJ7kM2nP4 expires 2026-09-05T18:00:00Z max_downloads=3
+uploaded 01J8ZQ3V9N7X2K4M6P8R0T2W4Y hello.txt 6 B expires 2026-09-12T17:00:00Z
+link 01J8ZQ5C1D3F5H7J9L1N3P5R7T expires 2026-09-05T18:00:00Z max_downloads 3
+https://aispace.sh/d/K3f9Qm2xP7vL1nR8sT4wY6zA0bC5dE9fG3hJ7kM2nP4
 ```
+
+Timestamps are RFC 3339 in UTC, and `max_downloads` is `unlimited` when no cap was set.
 
 `--json` output: the `File` object; with `--link`, an envelope `{ "file": File, "link": ShareLink }`
 so both IDs and the URL are available in one parse. Encrypted uploads always return an envelope
@@ -182,8 +204,12 @@ url=$(echo "$report" | aispace upload - --name report.md --link --link-expires 2
 file_id=$(aispace upload big.zip --json | jq -r .id)
 ```
 
-Exit codes: 4 on any quota/size rejection, 5 on rate limit (not retried), 3 on bad key, 2 if `-`
-without `--name` or the path does not exist.
+Exit codes: 4 on any quota/size rejection, 5 on rate limit (uploads are never retried), 3 on bad
+key, 2 for a usage error such as `--link-expires` without `--link` or pointing at a directory. A
+path that does not exist is exit 1.
+
+If the upload succeeds but the link cannot be created, the file line (and, for `--encrypt`, the
+encryption block) is still printed before the error, so the stored file is not lost.
 
 ### `aispace download`
 
@@ -232,7 +258,8 @@ aispace decrypt <path|url|-> --output <path|-> [--identity-file PATH] [--json]
 Downloads if necessary and decrypts locally. The identity is read from `--identity-file`, or from
 `AISPACE_AGE_IDENTITY`; there is deliberately no identity value flag, to keep secrets out of shell
 history and process listings. Local `.age` input defaults to the same path without `.age` when
-`--output` is omitted. URL and stdin inputs require `--output`.
+`--output` is omitted; any other local input falls back to `<input>.decrypted`, and the command
+refuses to write over its own input. URL and stdin inputs require `--output`.
 
 Output files use mode `0600`, are never overwritten, and are deleted if age authentication fails.
 `--output -` streams plaintext to stdout and cannot be combined with `--json`.
@@ -253,7 +280,8 @@ file are fine; each has its own expiry, cap and counter, and can be revoked inde
 
 ```sh
 aispace link 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --expires 24h --max-downloads 1
-# → link https://aispace.sh/d/... expires 2026-09-06T17:00:00Z max_downloads=1
+# → link 01J8ZQ5C1D3F5H7J9L1N3P5R7T expires 2026-09-06T17:00:00Z max_downloads 1
+# → https://aispace.sh/d/...          (last line, so `| tail -n1` is the URL)
 
 aispace link 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --json | jq -r '.url, .expires_at'
 ```
@@ -266,22 +294,26 @@ Exit 1 with `not_found` if the file is unknown to this key or already expired.
 aispace ls [--all] [--json]
 ```
 
-Lists this key's live files (`GET /v1/files`). Follows `next_cursor` to the end unless `--json`
-is used, in which case the raw first page is printed; use `--all --json` to get a merged
-`{ "files": [...], "next_cursor": null }` across all pages.
+Lists this key's live files (`GET /v1/files`). It **always** follows `next_cursor` to the end, in
+both human and `--json` mode. `--all` is accepted for compatibility and does nothing.
+
+Human output is one line per file, `<id> <size> <expires> <name>`, with no header:
 
 ```
-ID                          SIZE      EXPIRES               NAME
-01J8ZQ3V9N7X2K4M6P8R0T2W4Y  1.0 MB    2026-09-12 17:00 UTC  report.pdf
-01J8ZQ5C1D3F5H7J9L1N3P5R7T  6 B       2026-09-12 17:01 UTC  hello.txt
+01J8ZQ3V9N7X2K4M6P8R0T2W4Y 1.0 MB 2026-09-12T17:00:00Z report.pdf
+01J8ZQ5C1D3F5H7J9L1N3P5R7T 6 B 2026-09-12T17:01:00Z hello.txt
 ```
+
+When the key holds no files, nothing is written to stdout and `no files` goes to stderr, so a
+`--json`-free pipeline stays empty. `--json` prints every page merged into one object, with
+`next_cursor` always `null` because the walk is already finished:
 
 ```sh
 # total bytes held by this key
-aispace ls --all --json | jq '[.files[].size_bytes] | add'
+aispace ls --json | jq '[.files[].size_bytes] | add'
 
 # files expiring within 24 h
-aispace ls --all --json | jq -r --argjson t "$(date +%s)" '.files[] | select(.expires_at - $t < 86400) | .name'
+aispace ls --json | jq -r --argjson t "$(date +%s)" '.files[] | select(.expires_at - $t < 86400) | .name'
 ```
 
 ### `aispace rm`
@@ -291,8 +323,18 @@ aispace rm <file_id> [<file_id>...] [--json]
 ```
 
 Deletes files (`DELETE /v1/files/:id`). All share links of the file stop working immediately and
-the key's used bytes drop. Prints `deleted <id>` per file; with `--json`, `{ "deleted": [ids] }`.
-Exit 1 if any ID was not found (others are still deleted).
+the key's used bytes drop. Prints `deleted <id>` per file; with `--json`, one object **per line**
+(JSON Lines, not one array):
+
+```
+{"deleted":"01J8ZQ3V9N7X2K4M6P8R0T2W4Y"}
+{"deleted":"01J8ZQ5C1D3F5H7J9L1N3P5R7T"}
+```
+
+IDs are processed in order and the command **stops at the first failure**, so the IDs after it are
+not deleted; the ones already printed were. The exit code is the one for the underlying error (1
+for `not_found`, 3 for a bad key), and when more than one ID was given the message is prefixed
+with the ID that failed.
 
 ### `aispace revoke`
 
@@ -300,8 +342,11 @@ Exit 1 if any ID was not found (others are still deleted).
 aispace revoke <link_id> [<link_id>...] [--json]
 ```
 
-Revokes share links (`DELETE /v1/links/:id`). The file remains. Idempotent. Link IDs come from
+Revokes share links (`DELETE /v1/links/:id`). The file remains. Link IDs come from
 `upload --link --json`, `link --json`, or `aispace links <file_id>`.
+
+Like `rm`, it prints `revoked <id>` per link (or `{"revoked":"<id>"}` per line with `--json`),
+processes IDs in order and stops at the first failure.
 
 ### `aispace links`
 
@@ -326,36 +371,52 @@ File metadata (`GET /v1/files/:id`).
 aispace quota [--json]
 ```
 
+Four lines, one per group:
+
 ```
-key      research-bot  used 1.0 MB / 5.0 MB   (4.0 MB remaining)
-account  free          used 3.0 MB / 10.0 MB  (7.0 MB remaining), 0 blocks
-month    uploads 12/100, downloads 340/1000, resets 2026-10-01 00:00 UTC
-limits   max file 5.0 MB, file ttl <= 7d, link ttl <= 7d, keys <= 2   (Paid: 100 MB, 30d, 30d, 20)
-rate     uploads 58/60 this hour, 490/500 today, 299/300 requests this minute
+key: used 1.0 MB of 50.0 MB, 49.0 MB remaining
+account: used 3.0 MB of 100.0 MB, 97.0 MB remaining, plan free (extra blocks 0)
+limits: max file 25.0 MB, max file ttl 30d, max link ttl 7d, uploads 60/h 500/d, requests 300/min
+rate: uploads remaining 58 this hour, 490 today; requests remaining 299 this minute
 ```
 
-The `month` row is the account-wide monthly cap; hitting it hard-stops uploads
-(`429 monthly_upload_cap`) or downloads (`429 monthly_download_cap`) until the reset shown.
+The typed response is `key`, `account`, `limits` and `rate` — see
+[`internal/api/types.go`](../internal/api/types.go), which `docs/API.md` names as the client
+contract. The account-wide monthly caps are not part of it: they surface as
+`429 monthly_upload_cap` / `429 monthly_download_cap` errors, which are never retried because the
+reset is the start of the next UTC month.
 
 ```sh
 aispace quota --json | jq '.key.remaining_bytes'
 aispace quota --json | jq -e '.rate.uploads_hour_remaining > 0' >/dev/null || echo "wait"
 
-# uploads left this month, and when the counter resets
-aispace quota --json | jq -r '"\(.month.uploads_limit - .month.uploads_used) uploads left, resets \(.month.period_end | todate)"'
+# largest file this account may upload right now
+aispace quota --json | jq '[.limits.max_file_bytes, .account.remaining_bytes] | min'
 ```
 
 ### `aispace whoami`
 
-Prints key name, prefix and account email (`GET /v1/whoami`). Exit 3 if the key is invalid.
+Prints key name, prefix, account email and the key's usage against its budget
+(`GET /v1/whoami`):
+
+```
+research-bot (ask_9fK2mQ1x) luigi@example.com used 1.0 MB of 50.0 MB
+```
+
+Exit 3 if the key is invalid, and also if the server reports the key as revoked.
 
 ### `aispace version`
 
 ```
-aispace 0.3.1 (commit abc1234, go1.26.6, darwin/arm64)
+aispace 0.3.1 (darwin/arm64)
 ```
 
-`--json` → `{ "version": "0.3.1", "commit": "abc1234", "go": "go1.26.6", "os": "darwin", "arch": "arm64" }`.
+The version string is injected at build time with `-ldflags "-X main.version=..."` and is `dev` in
+an unstamped local build. `--json` prints the version and the exact `User-Agent` the client sends:
+
+```json
+{"user_agent":"aispace-cli/0.3.1 (darwin/arm64)","version":"0.3.1"}
+```
 
 ## Recipes
 
