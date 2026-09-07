@@ -36,6 +36,11 @@ go build -ldflags "-X main.version=0.0.0-dev" -o aispace .
 Tests that exercise the hosted service must use a dedicated low-budget key. Never commit a key or
 place it in a fixture, command transcript, issue, or pull-request description.
 
+Every `README.md` or Markdown document under `docs/` must be listed in `docs/index.json`, which
+groups pages for documentation consumers. JSON files are treated as metadata unless explicitly
+listed as API-reference documents. Run `node scripts/validate-index-json.mjs .` after adding,
+moving, or removing a document; CI rejects missing, duplicate, orphaned, or dead entries.
+
 ## Pull requests
 
 Keep each pull request focused on one behavior. Add or update tests for behavior changes and update

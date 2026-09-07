@@ -133,6 +133,17 @@ given up on quickly:
 | Waiting for response headers | 60s |
 | Upload/download with no byte progress | 2m |
 
+A transfer that trips the inactivity timer fails with exit `1` and code `timeout`, whether it
+stalled before the body started or part-way through it:
+
+```
+error: transfer stalled without byte progress (timeout)
+error: transfer stalled (timeout)
+```
+
+A partly written output file is removed, so a stalled download never leaves a truncated file
+behind.
+
 `Ctrl-C`/`SIGTERM` cancels in-flight requests, closes stdin to unblock ordinary pipes, and exits `1`
 with code `interrupted`. After the first signal, default handling is restored so a second interrupt
 can terminate a source that cannot be closed cleanly.
@@ -258,8 +269,10 @@ leaving it behind would make retrying the same command fail with `identity file 
 When the request fails without a response or returns a 5xx server error, the outcome is uncertain,
 so the identity is kept and a warning names it — check `aispace ls` before deleting it, because the
 file may have been stored. When no `--identity-out` was supplied, the CLI creates a mode-`0600`
-temporary recovery identity before uploading. It removes that recovery copy after a definite
-success or rejection, but keeps it and prints its path after an uncertain outcome.
+recovery identity under the private aispace configuration directory (`recovery/` beside
+`config.json`). It removes that recovery copy after a definite success or rejection, but keeps it
+and prints its path after an uncertain outcome. If the process is terminated abruptly, inspect that
+directory before removing a leftover key; it may be the only way to decrypt a stored upload.
 
 ### `aispace download`
 

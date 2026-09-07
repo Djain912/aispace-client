@@ -127,7 +127,11 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 
 	var encrypted *encryptedUpload
 	if f.encrypt {
-		encrypted, err = encryptForUpload(src, originalName, f.recipient, f.identityOut)
+		recoveryDir := ""
+		if f.recipient == "" && f.identityOut == "" {
+			recoveryDir = filepath.Join(filepath.Dir(a.cfg.Path), "recovery")
+		}
+		encrypted, err = encryptForUpload(src, originalName, f.recipient, f.identityOut, recoveryDir)
 		if err != nil {
 			return err
 		}
