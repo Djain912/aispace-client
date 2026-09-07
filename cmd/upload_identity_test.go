@@ -109,7 +109,7 @@ func TestUploadKeepsIdentityWhenOutcomeIsUnknown(t *testing.T) {
 }
 
 func TestUploadKeepsGeneratedRecoveryIdentityWhenOutcomeIsUnknown(t *testing.T) {
-	isolate(t)
+	configHome := isolate(t)
 	f := newFakeServer(t)
 	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
 	dir := t.TempDir()
@@ -130,6 +130,19 @@ func TestUploadKeepsGeneratedRecoveryIdentityWhenOutcomeIsUnknown(t *testing.T) 
 	}
 	path := strings.SplitN(r.stderr[start+len(prefix):], ";", 2)[0]
 	t.Cleanup(func() { _ = os.Remove(path) })
+	wantDir := filepath.Join(configHome, "xdg", "aispace", "recovery")
+	if filepath.Dir(path) != wantDir {
+		t.Fatalf("recovery identity directory = %q, want %q", filepath.Dir(path), wantDir)
+	}
+	if permBits {
+		info, err := os.Stat(wantDir)
+		if err != nil {
+			t.Fatalf("stat recovery directory: %v", err)
+		}
+		if info.Mode().Perm() != 0o700 {
+			t.Fatalf("recovery directory mode = %04o, want 0700", info.Mode().Perm())
+		}
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read recovery identity: %v", err)
@@ -140,7 +153,7 @@ func TestUploadKeepsGeneratedRecoveryIdentityWhenOutcomeIsUnknown(t *testing.T) 
 }
 
 func TestGeneratedRecoveryIdentityIsTemporaryOnSuccess(t *testing.T) {
-	e, err := encryptForUpload(strings.NewReader("secret"), "secret.txt", "", "")
+	e, err := encryptForUpload(strings.NewReader("secret"), "secret.txt", "", "", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +172,7 @@ func TestGeneratedRecoveryIdentityIsTemporaryOnSuccess(t *testing.T) {
 
 func TestLocalEncryptionFailureRemovesIdentityFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "secret.agekey")
-	_, err := encryptForUpload(failingUploadReader{}, "secret.txt", "", path)
+	_, err := encryptForUpload(failingUploadReader{}, "secret.txt", "", path, "")
 	if err == nil {
 		t.Fatal("expected encryption to fail")
 	}
