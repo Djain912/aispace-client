@@ -32,6 +32,9 @@ const (
 	// HeaderTimeout bounds the wait for response headers, which is what catches
 	// a server that accepts the connection and then goes quiet.
 	HeaderTimeout = 60 * time.Second
+	// TransferInactivityTimeout cancels an upload or download when no body bytes
+	// move for this long. It resets whenever progress is made.
+	TransferInactivityTimeout = 2 * time.Minute
 )
 
 // NewHTTPClient returns the HTTP client used for aispace requests: quick to
@@ -67,6 +70,8 @@ type Client struct {
 	Key       string
 	UserAgent string
 	HTTP      *http.Client
+	// InactivityTimeout bounds time without byte progress during transfers. Zero disables it.
+	InactivityTimeout time.Duration
 	// Sleep overrides retry waiting for tests. Nil uses a context-aware timer.
 	Sleep func(time.Duration)
 }
@@ -74,10 +79,11 @@ type Client struct {
 // New returns a Client with sane defaults. baseURL must include the scheme.
 func New(baseURL, key, userAgent string) *Client {
 	return &Client{
-		BaseURL:   strings.TrimRight(baseURL, "/"),
-		Key:       key,
-		UserAgent: userAgent,
-		HTTP:      NewHTTPClient(),
+		BaseURL:           strings.TrimRight(baseURL, "/"),
+		Key:               key,
+		UserAgent:         userAgent,
+		HTTP:              NewHTTPClient(),
+		InactivityTimeout: TransferInactivityTimeout,
 	}
 }
 
@@ -99,7 +105,12 @@ type UploadOptions struct {
 
 // Upload streams body to POST /v1/files.
 func (c *Client) Upload(ctx context.Context, body io.Reader, opts UploadOptions) (Result[File], error) {
-	req, err := c.newRequest(ctx, http.MethodPost, "/v1/files", body)
+	transferCtx, watch := startTransferWatch(ctx, c.InactivityTimeout)
+	defer watch.stop()
+	if watch != nil {
+		body = &progressReader{r: body, watch: watch}
+	}
+	req, err := c.newRequest(transferCtx, http.MethodPost, "/v1/files", body)
 	if err != nil {
 		return Result[File]{}, err
 	}
@@ -128,14 +139,20 @@ func (c *Client) Upload(ctx context.Context, body io.Reader, opts UploadOptions)
 	if opts.Visibility != "" {
 		req.Header.Set("X-File-Visibility", opts.Visibility)
 	}
-	return do[File](c, req, http.StatusCreated)
+	res, err := doRequest[File](c, req, http.StatusCreated, watch)
+	if errors.Is(context.Cause(transferCtx), ErrTransferStalled) {
+		return Result[File]{}, stalledError()
+	}
+	return res, err
 }
 
 // Download opens an authenticated stream from GET /v1/files/:id/content.
 // The caller must close the response body.
 func (c *Client) Download(ctx context.Context, id string) (*http.Response, error) {
-	req, err := c.newRequest(ctx, http.MethodGet, "/v1/files/"+url.PathEscape(id)+"/content", nil)
+	transferCtx, watch := startTransferWatch(ctx, c.InactivityTimeout)
+	req, err := c.newRequest(transferCtx, http.MethodGet, "/v1/files/"+url.PathEscape(id)+"/content", nil)
 	if err != nil {
+		watch.stop()
 		return nil, err
 	}
 	httpc := c.HTTP
@@ -145,14 +162,26 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 	for attempt := 0; ; attempt++ {
 		resp, err := httpc.Do(req)
 		if err != nil {
+			watch.stop()
+			if errors.Is(context.Cause(transferCtx), ErrTransferStalled) {
+				return nil, stalledError()
+			}
 			return nil, networkError(err)
 		}
 		if resp.StatusCode == http.StatusOK {
+			if watch != nil {
+				watch.touch()
+				resp.Body = &watchedBody{ReadCloser: resp.Body, ctx: transferCtx, watch: watch}
+			}
 			return resp, nil
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		_ = resp.Body.Close()
 		if readErr != nil {
+			watch.stop()
+			if errors.Is(context.Cause(transferCtx), ErrTransferStalled) {
+				return nil, stalledError()
+			}
 			return nil, &Error{Code: "network", Message: "reading response: " + readErr.Error(), cause: readErr}
 		}
 		// Authenticated downloads consume monthly allowance. A gateway error may
@@ -161,14 +190,17 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 		// download handler and remains safe to retry.
 		if attempt == 0 && retryableRateLimit(resp, body) {
 			if err := waitForRetry(req.Context(), retryDelay(resp.Header.Get("Retry-After")), c.Sleep); err != nil {
+				watch.stop()
 				return nil, err
 			}
 			req = req.Clone(req.Context())
 			continue
 		}
 		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			watch.stop()
 			return nil, unexpectedStatus(resp.StatusCode, http.StatusOK)
 		}
+		watch.stop()
 		return nil, errorFromResponse(resp, body)
 	}
 }
@@ -342,11 +374,15 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 
 // do executes the request, retrying GET requests once on temporary rate limits.
 func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) {
+	return doRequest[T](c, req, wantStatus, nil)
+}
+
+func doRequest[T any](c *Client, req *http.Request, wantStatus int, watch *transferWatch) (Result[T], error) {
 	httpc := c.HTTP
 	if httpc == nil {
 		httpc = http.DefaultClient
 	}
-	resp, body, err := send(httpc, req)
+	resp, body, err := send(httpc, req, watch)
 	if err != nil {
 		return Result[T]{}, err
 	}
@@ -356,7 +392,7 @@ func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) 
 			return Result[T]{}, err
 		}
 		retry := req.Clone(req.Context())
-		resp, body, err = send(httpc, retry)
+		resp, body, err = send(httpc, retry, watch)
 		if err != nil {
 			return Result[T]{}, err
 		}
@@ -413,10 +449,14 @@ func waitForRetry(ctx context.Context, delay time.Duration, sleep func(time.Dura
 	}
 }
 
-func send(httpc *http.Client, req *http.Request) (*http.Response, []byte, error) {
+func send(httpc *http.Client, req *http.Request, watch *transferWatch) (*http.Response, []byte, error) {
 	resp, err := httpc.Do(req)
 	if err != nil {
 		return nil, nil, networkError(err)
+	}
+	if watch != nil {
+		watch.touch()
+		resp.Body = &watchedBody{ReadCloser: resp.Body, ctx: req.Context(), watch: watch}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

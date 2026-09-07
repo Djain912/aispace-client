@@ -85,9 +85,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, version strin
 	root.SetErr(stderr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	err := root.ExecuteContext(ctx)
+	err := executeCommand(root, ctx, stdin, stop)
 	if err == nil {
 		return ExitOK
 	}
@@ -97,6 +95,34 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, version strin
 		a.printError(err, apiCode)
 	}
 	return code
+}
+
+func executeCommand(root *cobra.Command, ctx context.Context, stdin io.Reader, stop func()) error {
+	executionDone := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			// Restore default signal handling so a second interrupt terminates even
+			// if a local stdin read cannot return. Closing stdin unblocks normal pipes.
+			stop()
+			if closer, ok := stdin.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		case <-executionDone:
+		}
+	}()
+
+	err := root.ExecuteContext(ctx)
+	close(executionDone)
+	<-watcherDone
+	interrupted := ctx.Err() != nil
+	stop()
+	if interrupted {
+		return context.Canceled
+	}
+	return err
 }
 
 func (a *app) newRootCmd() *cobra.Command {
@@ -274,6 +300,9 @@ func validateKey(key string) error {
 
 // classify maps an error to (exit code, error code string).
 func (a *app) classify(err error) (int, string) {
+	if errors.Is(err, context.Canceled) {
+		return ExitGeneric, "interrupted"
+	}
 	var ue *usageError
 	if errors.As(err, &ue) {
 		return ExitUsage, "usage"
@@ -285,9 +314,6 @@ func (a *app) classify(err error) (int, string) {
 	var ae *api.Error
 	if errors.As(err, &ae) {
 		return ae.ExitCode(), ae.Code
-	}
-	if errors.Is(err, context.Canceled) {
-		return ExitGeneric, "interrupted"
 	}
 	return ExitGeneric, "error"
 }

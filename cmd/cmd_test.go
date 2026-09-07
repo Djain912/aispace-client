@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,9 +21,49 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/spf13/cobra"
 
 	"github.com/aispace-sh/aispace-client/internal/config"
 )
+
+func TestCancellationClosesStdinAndWinsOverClosedFileError(t *testing.T) {
+	stdin := newBlockingReadCloser()
+	root := &cobra.Command{RunE: func(*cobra.Command, []string) error {
+		_, err := io.Copy(io.Discard, stdin)
+		return &codedError{code: "io", err: fmt.Errorf("read stdin: %w", err), exit: ExitGeneric}
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-stdin.reading
+		cancel()
+	}()
+	err := executeCommand(root, ctx, stdin, cancel)
+	exit, code := (&app{}).classify(err)
+	if exit != ExitGeneric || code != "interrupted" {
+		t.Fatalf("classify = (%d, %q), want (%d, interrupted)", exit, code, ExitGeneric)
+	}
+}
+
+type blockingReadCloser struct {
+	reading chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{reading: make(chan struct{}), closed: make(chan struct{})}
+}
+
+func (r *blockingReadCloser) Read([]byte) (int, error) {
+	r.once.Do(func() { close(r.reading) })
+	<-r.closed
+	return 0, os.ErrClosed
+}
+
+func (r *blockingReadCloser) Close() error {
+	close(r.closed)
+	return nil
+}
 
 // fakeServer is a minimal in-memory aispace /v1 implementation.
 type fakeServer struct {
