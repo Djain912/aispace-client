@@ -9,10 +9,15 @@ const path = require('node:path');
 const REPOSITORY = 'aispace-sh/aispace-client';
 
 function platformAsset(platform = process.platform, arch = process.arch) {
-  const os = { darwin: 'darwin', linux: 'linux' }[platform];
+  const os = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[platform];
   const cpu = { x64: 'amd64', arm64: 'arm64' }[arch];
   if (!os || !cpu) throw new Error(`unsupported platform: ${platform}/${arch}`);
-  return `aispace_${os}_${cpu}`;
+  const extension = platform === 'win32' ? '.exe' : '';
+  return `aispace_${os}_${cpu}${extension}`;
+}
+
+function binaryName(platform = process.platform) {
+  return platform === 'win32' ? 'aispace.exe' : 'aispace';
 }
 
 function download(url, redirects = 0) {
@@ -45,7 +50,7 @@ function expectedChecksum(checksums, asset) {
 
 async function main() {
   const pkg = require('../package.json');
-  const target = path.join(__dirname, '..', 'bin', 'aispace');
+  const target = path.join(__dirname, '..', 'bin', binaryName());
   if (process.env.AISPACE_NPM_BINARY) {
     fs.copyFileSync(process.env.AISPACE_NPM_BINARY, target);
     fs.chmodSync(target, 0o755);
@@ -70,4 +75,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { expectedChecksum, platformAsset };
+module.exports = { binaryName, expectedChecksum, platformAsset };

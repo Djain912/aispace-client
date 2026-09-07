@@ -17,6 +17,16 @@ places it in `/usr/local/bin` (or `~/.local/bin` if that is not writable). Overr
 `AISPACE_INSTALL_DIR=/path`. Manual install: download the asset for your platform from
 [GitHub Releases](https://github.com/aispace-sh/aispace-client/releases), `chmod +x`, move to `$PATH`.
 
+On Windows x64 or ARM64, install through npm; it downloads the matching checksummed `.exe` release:
+
+```powershell
+npm install -g @aispace-sh/cli
+aispace version
+```
+
+Windows binaries are checksum-verified but not currently code-signed, so Windows may show a
+SmartScreen warning on first run.
+
 Build from source:
 
 ```sh

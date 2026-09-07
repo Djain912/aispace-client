@@ -90,7 +90,7 @@ The URL is always the last output line; `--json` makes the entire exchange machi
 ## Submission checklist
 
 - GitHub release, npm, Homebrew, and shell installer all return the same version.
-- README install commands work on a clean macOS and Linux environment.
+- Applicable README install commands work on clean macOS, Linux, and Windows environments.
 - Social preview is uploaded in GitHub repository settings.
 - Repository description, website, and topics match the canonical wording above.
 - The demo contains no real key, private link, file ID, or encryption identity.
