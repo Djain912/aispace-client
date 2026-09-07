@@ -41,6 +41,55 @@ type encryptionOutput struct {
 	OriginalName string `json:"original_name"`
 }
 
+type keygenOutput struct {
+	Algorithm    string `json:"algorithm"`
+	Recipient    string `json:"recipient"`
+	Identity     string `json:"identity,omitempty"`
+	IdentityFile string `json:"identity_file,omitempty"`
+}
+
+func (a *app) keygenCmd() *cobra.Command {
+	var identityOut string
+	cmd := &cobra.Command{
+		Use:   "keygen [--identity-out PATH]",
+		Short: "Generate an age X25519 identity and recipient locally",
+		Long: "Generates an age X25519 key pair locally without contacting aispace.\n" +
+			"With --identity-out, the secret identity is saved to a new mode-0600 file\n" +
+			"and is not printed; the public recipient is always printed.",
+		Args: noArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			identity, err := age.GenerateX25519Identity()
+			if err != nil {
+				return &codedError{code: "keygen", err: fmt.Errorf("generate age identity: %w", err), exit: ExitGeneric}
+			}
+			out := keygenOutput{
+				Algorithm: clientEncryptionAlgorithm,
+				Recipient: identity.Recipient().String(),
+				Identity:  identity.String(),
+			}
+			if identityOut != "" {
+				if err := writeSecretFile(identityOut, out.Identity+"\n"); err != nil {
+					return err
+				}
+				out.Identity = ""
+				out.IdentityFile = identityOut
+			}
+			if a.jsonOut {
+				return a.printJSONValue(out)
+			}
+			fmt.Fprintf(a.stdout, "recipient %s\n", out.Recipient)
+			if out.IdentityFile != "" {
+				fmt.Fprintf(a.stdout, "identity saved %s\n", out.IdentityFile)
+			} else {
+				fmt.Fprintf(a.stdout, "identity %s\n", out.Identity)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&identityOut, "identity-out", "", "save the identity to a new mode-0600 file instead of printing it")
+	return cmd
+}
+
 func encryptForUpload(src io.Reader, originalName, recipientText, identityOut string) (*encryptedUpload, error) {
 	var recipient age.Recipient
 	var identity string

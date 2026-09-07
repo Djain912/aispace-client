@@ -10,6 +10,7 @@ type File struct {
 	SizeBytes   int64  `json:"size_bytes"`
 	SHA256      string `json:"sha256,omitempty"`
 	EncAlg      string `json:"enc_alg,omitempty"`
+	Visibility  string `json:"visibility"`
 	CreatedAt   int64  `json:"created_at"`
 	ExpiresAt   int64  `json:"expires_at"`
 }
@@ -52,6 +53,7 @@ type Quota struct {
 		BudgetBytes    int64 `json:"budget_bytes"`
 		UsedBytes      int64 `json:"used_bytes"`
 		RemainingBytes int64 `json:"remaining_bytes"`
+		BudgetLimited  bool  `json:"budget_limited"`
 	} `json:"key"`
 	Account struct {
 		AllowanceBytes int64  `json:"allowance_bytes"`

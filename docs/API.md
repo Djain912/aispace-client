@@ -23,8 +23,9 @@ Never put a bot key in a URL. JSON errors use the shape
 | `POST` | `/v1/files` | Upload a raw request body |
 | `GET` | `/v1/files` | List files using cursor pagination |
 | `GET` | `/v1/files/:id` | Read file metadata |
+| `GET` | `/v1/files/:id/content` | Authenticated download of an owned or account-shared file |
 | `DELETE` | `/v1/files/:id` | Delete a file and invalidate its links |
-| `POST` | `/v1/files/:id/links` | Create an expiring share link |
+| `POST` | `/v1/files/:id/links` | Create a Pro expiring public share link |
 | `GET` | `/v1/files/:id/links` | List link metadata; tokens are not returned |
 | `DELETE` | `/v1/links/:id` | Revoke a share link |
 | `GET`, `HEAD` | `/d/:token` | Download through a public share link |
@@ -41,10 +42,17 @@ curl -fsS -X POST https://aispace.sh/v1/files \
   --data-binary @report.pdf
 ```
 
-Optional headers are `X-Expires-In` and `X-SHA256`. The server requires `Content-Length` and
+Optional headers are `X-Expires-In`, `X-SHA256`, and `X-File-Visibility`. Visibility may be
+`private` or `account`; when omitted, the account's key-sharing setting applies. Account sharing
+does not create a public URL. The server requires `Content-Length` and
 returns the stored file metadata as JSON.
 
+Public access always requires the separate, explicit link-creation endpoint below.
+
 ## Create a link
+
+Creating public links requires Pro. Free accounts receive `402 payment_required`; existing links
+continue through their original expiry if an account later downgrades.
 
 ```sh
 curl -fsS -X POST https://aispace.sh/v1/files/FILE_ID/links \

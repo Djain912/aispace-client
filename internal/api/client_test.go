@@ -34,7 +34,7 @@ func TestUploadHeadersAndStreaming(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"01F","name":"a.txt","content_type":"text/plain","size_bytes":5,"created_at":1,"expires_at":2}`))
 	})
 	res, err := c.Upload(context.Background(), strings.NewReader("hello"), UploadOptions{
-		Name: "a.txt", ContentType: "text/plain", Encryption: "age-x25519", Size: 5, ExpiresIn: 3600, SHA256: "abc",
+		Name: "a.txt", ContentType: "text/plain", Encryption: "age-x25519", Size: 5, ExpiresIn: 3600, SHA256: "abc", Visibility: "account",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +52,7 @@ func TestUploadHeadersAndStreaming(t *testing.T) {
 		h.Get("X-Expires-In") != "3600" ||
 		h.Get("X-SHA256") != "abc" ||
 		h.Get("X-Aispace-Encryption") != "age-x25519" ||
+		h.Get("X-File-Visibility") != "account" ||
 		h.Get("User-Agent") != "aispace-cli/test (test/test)" {
 		t.Fatalf("headers: %v", h)
 	}
@@ -82,8 +83,29 @@ func TestUploadOmitsOptionalHeaders(t *testing.T) {
 	if _, ok := got["X-Aispace-Encryption"]; ok {
 		t.Fatal("X-Aispace-Encryption should be omitted")
 	}
+	if _, ok := got["X-File-Visibility"]; ok {
+		t.Fatal("X-File-Visibility should be omitted so the account setting applies")
+	}
 	if got.Get("Content-Type") != "application/octet-stream" {
 		t.Fatalf("default content-type = %q", got.Get("Content-Type"))
+	}
+}
+
+func TestDownloadAuthenticatedContent(t *testing.T) {
+	var got *http.Request
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		w.Header().Set("Content-Disposition", `attachment; filename="shared.txt"`)
+		_, _ = w.Write([]byte("shared contents"))
+	})
+	resp, err := c.Download(context.Background(), "f/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if got.URL.EscapedPath() != "/v1/files/f%2F1/content" || got.Header.Get("Authorization") != "Bearer ask_testkey" || string(body) != "shared contents" {
+		t.Fatalf("request=%v body=%q", got, body)
 	}
 }
 
@@ -149,6 +171,66 @@ func TestRateLimitRetryOnGET(t *testing.T) {
 	if res.Value.Key.RemainingBytes != 9 {
 		t.Fatalf("decoded %+v", res.Value)
 	}
+}
+
+func TestMonthlyCapIsNotRetriedOnGET(t *testing.T) {
+	calls := 0
+	c, slept := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "100")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"code":"monthly_download_cap","message":"monthly cap reached"}}`))
+	})
+	_, err := c.Quota(context.Background())
+	var ae *Error
+	if !errors.As(err, &ae) || ae.Code != "monthly_download_cap" {
+		t.Fatalf("err = %v", err)
+	}
+	if calls != 1 || len(*slept) != 0 {
+		t.Fatalf("calls=%d slept=%v, want no retry", calls, *slept)
+	}
+}
+
+func TestDownloadRetriesRateLimitButNotMonthlyCap(t *testing.T) {
+	t.Run("rate limited", func(t *testing.T) {
+		calls := 0
+		c, slept := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if calls == 1 {
+				w.Header().Set("Retry-After", "2")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"code":"rate_limited","message":"slow"}}`))
+				return
+			}
+			_, _ = w.Write([]byte("contents"))
+		})
+		resp, err := c.Download(context.Background(), "f1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if calls != 2 || len(*slept) != 1 || (*slept)[0] != 2*time.Second {
+			t.Fatalf("calls=%d slept=%v", calls, *slept)
+		}
+	})
+
+	t.Run("monthly cap", func(t *testing.T) {
+		calls := 0
+		c, slept := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.Header().Set("Retry-After", "100")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"code":"monthly_download_cap","message":"monthly cap reached"}}`))
+		})
+		_, err := c.Download(context.Background(), "f1")
+		var ae *Error
+		if !errors.As(err, &ae) || ae.Code != "monthly_download_cap" {
+			t.Fatalf("err = %v", err)
+		}
+		if calls != 1 || len(*slept) != 0 {
+			t.Fatalf("calls=%d slept=%v, want no retry", calls, *slept)
+		}
+	})
 }
 
 func TestRateLimitRetryOnlyOnce(t *testing.T) {

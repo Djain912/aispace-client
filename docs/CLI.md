@@ -114,6 +114,7 @@ logged in as research-bot (ask_9fK2mQ1x…) for luigi@example.com at https://ais
 ```
 aispace upload <path|-> [--name N] [--expires 7d] [--link] [--link-expires 1h]
                         [--max-downloads N] [--content-type T] [--sha256]
+                        [--private | --shared]
                         [--encrypt] [--recipient age1...] [--identity-out PATH] [--json]
 ```
 
@@ -123,11 +124,13 @@ Uploads one file with `POST /v1/files` (raw streamed body). `-` reads stdin.
 |---|---|---|
 | `--name N` | basename of `<path>`; **required** with `-` | Sent as `X-File-Name` |
 | `--expires D` | server default (7d) | File lifetime, `X-Expires-In`; max 30d |
-| `--link` | off | After upload, also create a share link and print its URL |
+| `--link` | off | After upload, also create a Pro public share link and print its URL |
 | `--link-expires D` | 1h | Link lifetime (implies `--link`) |
 | `--max-downloads N` | unlimited | Link download cap (implies `--link`) |
 | `--content-type T` | sniffed from extension, else `application/octet-stream` | Stored type |
 | `--sha256` | off | Compute SHA-256 locally and send `X-SHA256` so R2 verifies the body |
+| `--private` | account setting | Restrict this upload to the current key |
+| `--shared` | account setting | Make this upload readable by every key on the account |
 | `--encrypt` | off | Encrypt locally using age X25519; the service receives ciphertext only |
 | `--recipient age1...` | generated one-time recipient | Encrypt to an identity already held by the recipient |
 | `--identity-out PATH` | print once on stdout/JSON | Save a generated identity to a new mode-`0600` file; never overwrites |
@@ -136,6 +139,10 @@ Stdin is spooled to a temporary file first because the API requires `Content-Len
 file is removed after the request. There is no size limit on the CLI side; the server enforces
 `max_file_bytes` (5 MB on Free, 100 MB on Pro) and returns exit 4 if exceeded. Check
 `aispace quota --json | jq .limits.max_file_bytes` before large uploads.
+
+When neither `--private` nor `--shared` is supplied, the server applies the account's “Share files
+between my keys” setting, which is enabled by default. Account sharing is authenticated and does
+not create a public URL. `--link` is a separate, explicit public-sharing action available on Pro.
 
 ```sh
 # file
@@ -177,6 +184,44 @@ file_id=$(aispace upload big.zip --json | jq -r .id)
 
 Exit codes: 4 on any quota/size rejection, 5 on rate limit (not retried), 3 on bad key, 2 if `-`
 without `--name` or the path does not exist.
+
+### `aispace download`
+
+```
+aispace download <file_id> --output <path|-> [--json]
+```
+
+Downloads a file owned by the current key or shared with the account by another key. This uses
+key authentication and does not create or require a public link. Destination files are mode
+`0600`, never overwritten, and removed if the transfer fails. Use `--output -` for raw stdout;
+it cannot be combined with `--json`.
+
+```sh
+aispace download 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --output report.pdf
+```
+
+### `aispace keygen`
+
+```
+aispace keygen [--identity-out PATH] [--json]
+```
+
+Generates an age X25519 identity and public recipient entirely locally. It does not require an
+aispace account or make a network request. Without `--identity-out`, the secret identity is printed
+to stdout. With `--identity-out`, the identity is written to a new mode-`0600` file and never
+printed; an existing file is not overwritten.
+
+```sh
+aispace keygen --identity-out receiver.agekey
+# recipient age1...
+# identity saved receiver.agekey
+
+aispace keygen --identity-out receiver.agekey --json
+# {"algorithm":"age-x25519","recipient":"age1...","identity_file":"receiver.agekey"}
+```
+
+Give the `age1...` recipient to a sender, who can encrypt for it with
+`aispace upload --encrypt --recipient age1...`. Keep the `AGE-SECRET-KEY-...` identity private.
 
 ### `aispace decrypt`
 

@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
+
 	"github.com/aispace-sh/aispace-client/internal/config"
 )
 
@@ -87,7 +89,7 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		resp := map[string]any{
 			"id": "01FILE", "name": r.Header.Get("X-File-Name"), "content_type": r.Header.Get("Content-Type"),
-			"size_bytes": len(body), "sha256": r.Header.Get("X-SHA256"), "enc_alg": nullableString(r.Header.Get("X-Aispace-Encryption")), "created_at": 1757000000, "expires_at": 1757604800,
+			"size_bytes": len(body), "sha256": r.Header.Get("X-SHA256"), "enc_alg": nullableString(r.Header.Get("X-Aispace-Encryption")), "visibility": uploadVisibility(r), "created_at": 1757000000, "expires_at": 1757604800,
 		}
 		w.WriteHeader(201)
 		_ = json.NewEncoder(w).Encode(resp)
@@ -100,8 +102,11 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/links"):
 		_, _ = w.Write([]byte(`{"links":[{"id":"01L1","file_id":"01A","expires_at":1757003600,"max_downloads":3,"download_count":1,"created_at":1757000000,"revoked_at":null},{"id":"01L2","file_id":"01A","expires_at":1757003600,"max_downloads":null,"download_count":0,"created_at":1757000000,"revoked_at":1757000100}]}`))
+	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/content"):
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("shared contents"))
 	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/files/"):
-		_, _ = w.Write([]byte(`{"id":"01A","name":"a.txt","content_type":"text/plain","size_bytes":5,"sha256":"deadbeef","created_at":1757000000,"expires_at":1757604800}`))
+		_, _ = w.Write([]byte(`{"id":"01A","name":"a.txt","content_type":"text/plain","size_bytes":5,"sha256":"deadbeef","visibility":"account","created_at":1757000000,"expires_at":1757604800}`))
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/files/"):
 		w.WriteHeader(204)
 	case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/links"):
@@ -131,6 +136,13 @@ func nullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func uploadVisibility(r *http.Request) string {
+	if value := r.Header.Get("X-File-Visibility"); value != "" {
+		return value
+	}
+	return "account"
 }
 
 func (f *fakeServer) last() (*http.Request, []byte) {
@@ -195,6 +207,57 @@ func TestVersion(t *testing.T) {
 	var v map[string]string
 	if err := json.Unmarshal([]byte(r.stdout), &v); err != nil || v["version"] != "1.2.3" || !strings.HasPrefix(v["user_agent"], "aispace-cli/1.2.3 (") {
 		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestKeygen(t *testing.T) {
+	isolate(t)
+	r := run("", "keygen", "--json")
+	if r.code != 0 || r.stderr != "" {
+		t.Fatalf("%+v", r)
+	}
+	var out keygenOutput
+	if err := json.Unmarshal([]byte(r.stdout), &out); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := age.ParseX25519Identity(out.Identity)
+	if err != nil {
+		t.Fatalf("invalid generated identity: %v", err)
+	}
+	if out.Algorithm != clientEncryptionAlgorithm || out.Recipient != identity.Recipient().String() || out.IdentityFile != "" {
+		t.Fatalf("unexpected output: %+v", out)
+	}
+}
+
+func TestKeygenIdentityFile(t *testing.T) {
+	isolate(t)
+	path := filepath.Join(t.TempDir(), "receiver.agekey")
+	r := run("", "keygen", "--identity-out", path, "--json")
+	if r.code != 0 || r.stderr != "" {
+		t.Fatalf("%+v", r)
+	}
+	var out keygenOutput
+	if err := json.Unmarshal([]byte(r.stdout), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Identity != "" || out.IdentityFile != path {
+		t.Fatalf("secret leaked or path missing: %+v", out)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("identity file: info=%v err=%v", info, err)
+	}
+	r = run("", "keygen", "--identity-out", path)
+	if r.code != ExitUsage || !strings.Contains(r.stderr, "identity file already exists") {
+		t.Fatalf("existing identity was overwritten: %+v", r)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := age.ParseX25519Identity(strings.TrimSpace(string(stored)))
+	if err != nil || identity.Recipient().String() != out.Recipient {
+		t.Fatalf("stored identity does not match recipient: %v", err)
 	}
 }
 
@@ -606,6 +669,59 @@ func TestUploadStdinDefaultName(t *testing.T) {
 	}
 }
 
+func TestUploadVisibilityOverrides(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+
+	if r := run("x", "upload", "-"); r.code != 0 {
+		t.Fatalf("default upload: %+v", r)
+	}
+	req, _ := f.last()
+	if req.Header.Get("X-File-Visibility") != "" {
+		t.Fatalf("default upload should inherit account setting: %v", req.Header)
+	}
+	if r := run("x", "upload", "-", "--private"); r.code != 0 {
+		t.Fatalf("private upload: %+v", r)
+	}
+	req, _ = f.last()
+	if req.Header.Get("X-File-Visibility") != "private" {
+		t.Fatalf("private header: %v", req.Header)
+	}
+	if r := run("x", "upload", "-", "--shared"); r.code != 0 {
+		t.Fatalf("shared upload: %+v", r)
+	}
+	req, _ = f.last()
+	if req.Header.Get("X-File-Visibility") != "account" {
+		t.Fatalf("shared header: %v", req.Header)
+	}
+	if r := run("x", "upload", "-", "--private", "--shared"); r.code != ExitUsage {
+		t.Fatalf("conflicting visibility flags: %+v", r)
+	}
+}
+
+func TestDownloadByFileID(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+	output := filepath.Join(t.TempDir(), "shared.txt")
+	r := run("", "download", "01SHARED", "--output", output, "--json")
+	if r.code != 0 || r.stderr != "" {
+		t.Fatalf("%+v", r)
+	}
+	body, err := os.ReadFile(output)
+	if err != nil || string(body) != "shared contents" {
+		t.Fatalf("body=%q err=%v", body, err)
+	}
+	req, _ := f.last()
+	if req.URL.Path != "/v1/files/01SHARED/content" {
+		t.Fatalf("path %s", req.URL.Path)
+	}
+	if again := run("", "download", "01SHARED", "--output", output); again.code != ExitUsage {
+		t.Fatalf("overwrote output: %+v", again)
+	}
+}
+
 func TestUploadLinkJSON(t *testing.T) {
 	isolate(t)
 	f := newFakeServer(t)
@@ -883,7 +999,7 @@ func TestInfo(t *testing.T) {
 	f := newFakeServer(t)
 	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
 	r := run("", "info", "01A")
-	if r.code != 0 || r.stdout != "01A a.txt 5 B text/plain created 2025-09-04T15:33:20Z expires 2025-09-11T15:33:20Z sha256 deadbeef encryption none\n" {
+	if r.code != 0 || r.stdout != "01A a.txt 5 B text/plain created 2025-09-04T15:33:20Z expires 2025-09-11T15:33:20Z sha256 deadbeef encryption none visibility account\n" {
 		t.Fatalf("%+v", r)
 	}
 	req, _ := f.last()

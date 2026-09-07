@@ -53,6 +53,8 @@ type UploadOptions struct {
 	ExpiresIn int64
 	// SHA256 hex; empty means "do not send".
 	SHA256 string
+	// Visibility overrides the account default when set to "private" or "account".
+	Visibility string
 }
 
 // Upload streams body to POST /v1/files.
@@ -83,7 +85,45 @@ func (c *Client) Upload(ctx context.Context, body io.Reader, opts UploadOptions)
 	if opts.Encryption != "" {
 		req.Header.Set("X-Aispace-Encryption", opts.Encryption)
 	}
+	if opts.Visibility != "" {
+		req.Header.Set("X-File-Visibility", opts.Visibility)
+	}
 	return do[File](c, req, http.StatusCreated)
+}
+
+// Download opens an authenticated stream from GET /v1/files/:id/content.
+// The caller must close the response body.
+func (c *Client) Download(ctx context.Context, id string) (*http.Response, error) {
+	req, err := c.newRequest(ctx, http.MethodGet, "/v1/files/"+url.PathEscape(id)+"/content", nil)
+	if err != nil {
+		return nil, err
+	}
+	httpc := c.HTTP
+	if httpc == nil {
+		httpc = http.DefaultClient
+	}
+	for attempt := 0; ; attempt++ {
+		resp, err := httpc.Do(req)
+		if err != nil {
+			return nil, networkError(err)
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			return resp, nil
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, &Error{Code: "network", Message: "reading response: " + readErr.Error(), cause: readErr}
+		}
+		if attempt == 0 && retryableRateLimit(resp, body) {
+			if err := waitForRetry(req.Context(), retryDelay(resp.Header.Get("Retry-After")), c.Sleep); err != nil {
+				return nil, err
+			}
+			req = req.Clone(req.Context())
+			continue
+		}
+		return nil, errorFromResponse(resp, body)
+	}
 }
 
 // ListFiles fetches one page of GET /v1/files.
@@ -253,7 +293,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 	return req, nil
 }
 
-// do executes the request, retrying once on 429 for GET requests.
+// do executes the request, retrying GET requests once on temporary rate limits.
 func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) {
 	httpc := c.HTTP
 	if httpc == nil {
@@ -263,7 +303,7 @@ func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) 
 	if err != nil {
 		return Result[T]{}, err
 	}
-	if resp.StatusCode == http.StatusTooManyRequests && req.Method == http.MethodGet {
+	if req.Method == http.MethodGet && retryableRateLimit(resp, body) {
 		wait := retryDelay(resp.Header.Get("Retry-After"))
 		if err := waitForRetry(req.Context(), wait, c.Sleep); err != nil {
 			return Result[T]{}, err
@@ -315,12 +355,7 @@ func waitForRetry(ctx context.Context, delay time.Duration, sleep func(time.Dura
 func send(httpc *http.Client, req *http.Request) (*http.Response, []byte, error) {
 	resp, err := httpc.Do(req)
 	if err != nil {
-		var uerr *url.Error
-		msg := err.Error()
-		if errors.As(err, &uerr) {
-			msg = fmt.Sprintf("%s %s: %v", uerr.Op, redact(uerr.URL), uerr.Err)
-		}
-		return nil, nil, &Error{Code: "network", Message: msg, cause: err}
+		return nil, nil, networkError(err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
@@ -328,6 +363,19 @@ func send(httpc *http.Client, req *http.Request) (*http.Response, []byte, error)
 		return nil, nil, &Error{Code: "network", Message: "reading response: " + err.Error(), cause: err}
 	}
 	return resp, body, nil
+}
+
+func retryableRateLimit(resp *http.Response, body []byte) bool {
+	return resp.StatusCode == http.StatusTooManyRequests && errorFromResponse(resp, body).Code == "rate_limited"
+}
+
+func networkError(err error) *Error {
+	var uerr *url.Error
+	msg := err.Error()
+	if errors.As(err, &uerr) {
+		msg = fmt.Sprintf("%s %s: %v", uerr.Op, redact(uerr.URL), uerr.Err)
+	}
+	return &Error{Code: "network", Message: msg, cause: err}
 }
 
 // redact strips any query string from a URL before it lands in an error message.

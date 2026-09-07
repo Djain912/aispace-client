@@ -115,11 +115,13 @@ func (a *app) newRootCmd() *cobra.Command {
 
 	root.AddCommand(
 		a.loginCmd(),
+		a.keygenCmd(),
 		a.uploadCmd(),
 		a.decryptCmd(),
 		a.linkCmd(),
 		a.lsCmd(),
 		a.infoCmd(),
+		a.downloadCmd(),
 		a.linksCmd(),
 		a.rmCmd(),
 		a.revokeCmd(),

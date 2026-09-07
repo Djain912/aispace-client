@@ -28,11 +28,15 @@ go install github.com/aispace-sh/aispace-client@latest
 ```sh
 aispace login --key ask_...                 # validates and saves ~/.config/aispace/config.json (0600)
 aispace upload report.pdf --expires 7d --link --link-expires 1h --max-downloads 3
+aispace upload notes.md                         # inherits account key-sharing setting
+aispace upload secret.txt --private             # visible only to this key
 echo "hello" | aispace upload - --name note.txt --link    # stdin; the URL is the last line
 aispace upload secret.pdf --encrypt --identity-out secret.agekey --link
+aispace keygen --identity-out receiver.agekey   # prints the public age1... recipient
 aispace decrypt https://aispace.sh/d/... --identity-file secret.agekey --output secret.pdf
 aispace ls                                  # all pages; --all accepted as a no-op
 aispace info <file_id>
+aispace download <file_id> --output ./file       # authenticated; no public link
 aispace link <file_id> --expires 30m --max-downloads 1
 aispace links <file_id>                     # list links (URLs are only shown at creation)
 aispace revoke <link_id> [<link_id>...]

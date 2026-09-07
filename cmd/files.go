@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -11,12 +13,70 @@ import (
 	"github.com/aispace-sh/aispace-client/internal/duration"
 )
 
+func (a *app) downloadCmd() *cobra.Command {
+	var output string
+	cmd := &cobra.Command{
+		Use:   "download <file_id> --output <path|->",
+		Short: "Download an accessible file by ID without creating a public link",
+		Args:  exactArgs(1, "<file_id>"),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if output == "" {
+				return usagef("--output is required")
+			}
+			if output == "-" && a.jsonOut {
+				return usagef("--json cannot be used with --output -")
+			}
+			c, err := a.client()
+			if err != nil {
+				return err
+			}
+			resp, err := c.Download(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			if output == "-" {
+				_, err = io.Copy(a.stdout, resp.Body)
+				return err
+			}
+			out, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+			if err != nil {
+				if errors.Is(err, os.ErrExist) {
+					return usagef("output file already exists: %s", output)
+				}
+				return &codedError{code: "io", err: err, exit: ExitGeneric}
+			}
+			ok := false
+			defer func() {
+				_ = out.Close()
+				if !ok {
+					_ = os.Remove(output)
+				}
+			}()
+			if _, err = io.Copy(out, resp.Body); err != nil {
+				return &codedError{code: "io", err: err, exit: ExitGeneric}
+			}
+			if err = out.Close(); err != nil {
+				return &codedError{code: "io", err: err, exit: ExitGeneric}
+			}
+			ok = true
+			if a.jsonOut {
+				return a.printJSONValue(map[string]string{"file_id": args[0], "output": output})
+			}
+			fmt.Fprintf(a.stdout, "downloaded %s -> %s\n", args[0], output)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&output, "output", "o", "", "destination path, or - for stdout (required)")
+	return cmd
+}
+
 func (a *app) linkCmd() *cobra.Command {
 	var expires string
 	var maxDownloads int64
 	cmd := &cobra.Command{
 		Use:   "link <file_id> [--expires 1h] [--max-downloads N]",
-		Short: "Create a share link for a file; the URL is printed last on its own line",
+		Short: "Create a Pro public share link; the URL is printed last on its own line",
 		Args:  exactArgs(1, "<file_id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if maxDownloads < 0 {
@@ -124,7 +184,11 @@ func (a *app) infoCmd() *cobra.Command {
 			if enc == "" {
 				enc = "none"
 			}
-			fmt.Fprintf(a.stdout, "%s %s %s %s created %s expires %s sha256 %s encryption %s\n", f.ID, f.Name, fmtBytes(f.SizeBytes), f.ContentType, fmtTime(f.CreatedAt), fmtTime(f.ExpiresAt), sum, enc)
+			visibility := f.Visibility
+			if visibility == "" {
+				visibility = "unknown"
+			}
+			fmt.Fprintf(a.stdout, "%s %s %s %s created %s expires %s sha256 %s encryption %s visibility %s\n", f.ID, f.Name, fmtBytes(f.SizeBytes), f.ContentType, fmtTime(f.CreatedAt), fmtTime(f.ExpiresAt), sum, enc, visibility)
 			return nil
 		},
 	}

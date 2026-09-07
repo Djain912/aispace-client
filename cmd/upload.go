@@ -28,6 +28,8 @@ type uploadFlags struct {
 	encrypt      bool
 	recipient    string
 	identityOut  string
+	private      bool
+	shared       bool
 }
 
 func (a *app) uploadCmd() *cobra.Command {
@@ -51,7 +53,7 @@ func (a *app) uploadCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&f.name, "name", "", "file name to store (default: basename of path, or \"stdin\" for -)")
 	cmd.Flags().StringVar(&f.expires, "expires", "", "file lifetime, e.g. 30m, 24h, 7d (default: server default, 7d)")
-	cmd.Flags().BoolVar(&f.link, "link", false, "create a share link after upload and print its URL last")
+	cmd.Flags().BoolVar(&f.link, "link", false, "create a Pro public share link after upload and print its URL last")
 	cmd.Flags().StringVar(&f.linkExpires, "link-expires", "", "share link lifetime, e.g. 1h (requires --link; default: server default, 1h)")
 	cmd.Flags().Int64Var(&f.maxDownloads, "max-downloads", 0, "share link download cap (requires --link; default: unlimited)")
 	cmd.Flags().StringVar(&f.contentType, "content-type", "", "MIME type to store (default: guessed from the file extension)")
@@ -59,6 +61,8 @@ func (a *app) uploadCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.encrypt, "encrypt", false, "encrypt locally with age X25519 before upload")
 	cmd.Flags().StringVar(&f.recipient, "recipient", "", "existing age X25519 recipient (requires --encrypt; otherwise a one-time identity is generated)")
 	cmd.Flags().StringVar(&f.identityOut, "identity-out", "", "save the generated decryption identity to a new mode-0600 file (requires --encrypt)")
+	cmd.Flags().BoolVar(&f.private, "private", false, "keep this upload private to the current key")
+	cmd.Flags().BoolVar(&f.shared, "shared", false, "share this upload with every key on the account")
 	return cmd
 }
 
@@ -74,6 +78,9 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 	}
 	if f.recipient != "" && f.identityOut != "" {
 		return usagef("--identity-out cannot be used with --recipient because the recipient owns the identity")
+	}
+	if f.private && f.shared {
+		return usagef("--private and --shared are mutually exclusive")
 	}
 	var expiresIn, linkExpiresIn int64
 	var err error
@@ -118,6 +125,11 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 		ct = encryptedContentType
 	}
 	opts := api.UploadOptions{Name: name, Size: size, ExpiresIn: expiresIn, ContentType: ct}
+	if f.private {
+		opts.Visibility = "private"
+	} else if f.shared {
+		opts.Visibility = "account"
+	}
 	if encrypted != nil {
 		opts.Encryption = clientEncryptionAlgorithm
 	}

@@ -1,8 +1,7 @@
 # Giving aispace to an LLM agent
 
-aispace exists so an agent can *hand a human a file*: a report, a CSV, a rendered chart, a log
-bundle. The agent uploads under a bot key with a fixed budget and returns a link that dies on its
-own. This document shows how to wire it up in the three common shapes: a shell tool, a JSON tool
+aispace lets an agent store temporary files, exchange them with sibling keys on the same account,
+and explicitly hand a human a file through an expiring public link. This document shows how to wire it up in the three common shapes: a shell tool, a JSON tool
 schema, and a system-prompt snippet.
 
 Prerequisites: a human created a bot key in the dashboard and gave it to the agent's runtime as
@@ -18,6 +17,8 @@ long or too structured for chat (reports, tables, code bundles, images).
 - Upload and link in one call:  echo "$CONTENT" | aispace upload - --name NAME --link --link-expires 1h --json
   or for a file on disk:        aispace upload PATH --link --link-expires 1h --json
 - Parse `.link.url` from the JSON and give that URL to the user, together with when it expires.
+- Do not add `--link` for ordinary storage or same-account agent handoffs. Uploads inherit the
+  account key-sharing setting; sibling agents use `aispace download FILE_ID --output PATH`.
 - Default to a 1-hour link (`--link-expires 1h`). Use up to 24h only if the user says they will
   read it later. Add `--max-downloads 1` for anything sensitive.
 - Files themselves expire after 7 days by default (`--expires`); the maximum is 7 days on the
@@ -87,7 +88,7 @@ Anthropic `tools[]` entries (rename `parameters` → `input_schema` for Anthropi
         "path": { "type": "string", "description": "Path to an existing local file to upload. Provide either content or path." },
         "content_type": { "type": "string", "description": "MIME type. Defaults from the extension." },
         "expires": { "type": "string", "description": "File lifetime such as 1h, 3d, 7d. Maximum 7d on the free plan, 30d on Pro; longer values are clamped. Default 7d.", "default": "7d" },
-        "link": { "type": "boolean", "description": "Also create a share link.", "default": true },
+        "link": { "type": "boolean", "description": "Also create a public share link. Enable only when sharing outside the account is requested.", "default": false },
         "link_expires": { "type": "string", "description": "Link lifetime such as 15m, 1h, 24h. Maximum 7d on the free plan and 30d on paid, and never past the file's own expiry; longer values are clamped. Default 1h.", "default": "1h" },
         "max_downloads": { "type": "integer", "minimum": 1, "description": "Optional cap on downloads for the link. Use 1 for sensitive one-shot delivery." },
         "encrypt": { "type": "boolean", "description": "Encrypt locally with age X25519 before upload. The service stores ciphertext only.", "default": false },
