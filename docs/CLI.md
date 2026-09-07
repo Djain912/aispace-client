@@ -428,7 +428,7 @@ line per file and the resume hint goes to stderr, so a pipeline is unaffected:
 $ aispace ls --limit 3
 01J8ZQ3V9N7X2K4M6P8R0T2W4Y 1.0 MB 2026-09-12T17:00:00Z report.pdf
 ...
-more files remain; continue with --cursor 3        # stderr
+more files remain; continue with --limit 3 --cursor 3        # stderr
 ```
 
 ### `aispace rm`

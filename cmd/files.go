@@ -204,8 +204,8 @@ func (a *app) lsCmd() *cobra.Command {
 			"  aispace ls --limit 50 --cursor \"$(aispace ls --limit 50 --json | jq -r .next_cursor)\" --json",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if limit < 0 {
-				return usagef("--limit must be >= 0")
+			if cmd.Flags().Changed("limit") && limit < 1 {
+				return usagef("--limit must be >= 1")
 			}
 			c, err := a.client()
 			if err != nil {
@@ -216,7 +216,7 @@ func (a *app) lsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return a.printFileList(raws, files, next)
+				return a.printFileList(raws, files, next, limit)
 			}
 			if a.jsonOut {
 				var raws []json.RawMessage
@@ -227,7 +227,7 @@ func (a *app) lsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return a.printFileList(raws, nil, "")
+				return a.printFileList(raws, nil, "", 0)
 			}
 			count := 0
 			err = c.WalkFilesFrom(cmd.Context(), cursor, func(_ []json.RawMessage, files []api.File) error {
@@ -254,7 +254,7 @@ func (a *app) lsCmd() *cobra.Command {
 
 // printFileList renders a listing in whichever mode is active. next is the
 // cursor to resume from, empty when the listing reached the end.
-func (a *app) printFileList(raws []json.RawMessage, files []api.File, next string) error {
+func (a *app) printFileList(raws []json.RawMessage, files []api.File, next string, limit int) error {
 	if a.jsonOut {
 		if raws == nil {
 			raws = []json.RawMessage{}
@@ -276,7 +276,7 @@ func (a *app) printFileList(raws []json.RawMessage, files []api.File, next strin
 	}
 	if next != "" {
 		// stderr, so stdout stays one line per file for a pipeline.
-		fmt.Fprintf(a.stderr, "more files remain; continue with --cursor %s\n", next)
+		fmt.Fprintf(a.stderr, "more files remain; continue with --limit %d --cursor %s\n", limit, next)
 	}
 	return nil
 }

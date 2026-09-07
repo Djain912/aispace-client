@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,7 +46,13 @@ func newPagedServer(t *testing.T, total, pageMax int) *pagedServer {
 		}
 		size := p.pageMax
 		if l := q.Get("limit"); l != "" {
-			if n, err := strconv.Atoi(l); err == nil && n < size {
+			n, err := strconv.Atoi(l)
+			if err != nil || n < 1 || n > 100 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"code":"bad_request","message":"limit must be between 1 and 100"}}`))
+				return
+			}
+			if n < size {
 				size = n
 			}
 		}
@@ -171,6 +178,28 @@ func TestLsLimitBeyondEndReportsNoCursor(t *testing.T) {
 	}
 }
 
+func TestLsLimitAboveServerMaximumUsesMultipleRequests(t *testing.T) {
+	isolate(t)
+	p := newPagedServer(t, 300, 100)
+	writeConfig(t, config.File{Key: p.key, URL: p.srv.URL})
+
+	r := run("", "ls", "--limit", "250", "--json")
+	if r.code != ExitOK {
+		t.Fatalf("%+v", r)
+	}
+	got := parseLs(t, r.stdout)
+	if len(got.Files) != 250 {
+		t.Fatalf("got %d files, want 250", len(got.Files))
+	}
+	if got.NextCursor == nil || *got.NextCursor != "250" {
+		t.Fatalf("next_cursor = %v, want a resume point at 250", got.NextCursor)
+	}
+	wantCalls := []string{"cursor= limit=100", "cursor=100 limit=100", "cursor=200 limit=50"}
+	if calls := p.calls(); !slices.Equal(calls, wantCalls) {
+		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	}
+}
+
 // Without --limit nothing changes: every page is walked and next_cursor is null.
 func TestLsWithoutLimitStillWalksEverything(t *testing.T) {
 	isolate(t)
@@ -204,8 +233,8 @@ func TestLsLimitHumanOutputKeepsStdoutClean(t *testing.T) {
 	if !strings.HasPrefix(lines[0], "F000 ") {
 		t.Fatalf("first line = %q", lines[0])
 	}
-	if !strings.Contains(r.stderr, "--cursor 3") {
-		t.Fatalf("stderr should name the resume cursor: %q", r.stderr)
+	if !strings.Contains(r.stderr, "--limit 3 --cursor 3") {
+		t.Fatalf("stderr should preserve the page size and name the resume cursor: %q", r.stderr)
 	}
 }
 
@@ -215,7 +244,21 @@ func TestLsRejectsNegativeLimit(t *testing.T) {
 	writeConfig(t, config.File{Key: p.key, URL: p.srv.URL})
 
 	r := run("", "ls", "--limit", "-1")
-	if r.code != ExitUsage || !strings.Contains(r.stderr, "--limit must be >= 0") {
+	if r.code != ExitUsage || !strings.Contains(r.stderr, "--limit must be >= 1") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestLsRejectsExplicitZeroLimit(t *testing.T) {
+	isolate(t)
+	p := newPagedServer(t, 1, 1)
+	writeConfig(t, config.File{Key: p.key, URL: p.srv.URL})
+
+	r := run("", "ls", "--limit", "0")
+	if r.code != ExitUsage || !strings.Contains(r.stderr, "--limit must be >= 1") {
+		t.Fatalf("%+v", r)
+	}
+	if calls := p.calls(); len(calls) != 0 {
+		t.Fatalf("server received requests for invalid limit: %v", calls)
 	}
 }

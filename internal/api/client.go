@@ -205,6 +205,8 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 	}
 }
 
+const maxListFilesLimit = 100
+
 // ListFiles fetches one page of GET /v1/files.
 func (c *Client) ListFiles(ctx context.Context, cursor string, limit int) (Result[FileList], error) {
 	q := url.Values{}
@@ -230,11 +232,8 @@ func (c *Client) ListFiles(ctx context.Context, cursor string, limit int) (Resul
 // decoded values, and the cursor to resume from, which is empty once the
 // listing is exhausted.
 //
-// Each request asks for exactly the number still wanted, so the cursor the
-// server hands back stays aligned with what was consumed. A server that
-// returns more than it was asked for keeps its extra entries rather than
-// having them truncated, because dropping them would leave the resume cursor
-// pointing past files the caller never saw.
+// Each request asks for the smaller of the number still wanted and the API's
+// per-request maximum, so the cursor stays aligned with what was consumed.
 func (c *Client) ListPage(ctx context.Context, cursor string, limit int) ([]json.RawMessage, []File, string, error) {
 	if limit <= 0 {
 		return nil, nil, "", &Error{Code: "bad_request", Message: "limit must be positive"}
@@ -243,11 +242,15 @@ func (c *Client) ListPage(ctx context.Context, cursor string, limit int) ([]json
 	var files []File
 	seen := map[string]struct{}{}
 	for len(raws) < limit {
-		res, err := c.ListFiles(ctx, cursor, limit-len(raws))
+		requestLimit := min(limit-len(raws), maxListFilesLimit)
+		res, err := c.ListFiles(ctx, cursor, requestLimit)
 		if err != nil {
 			return nil, nil, "", err
 		}
 		page := res.Value.Files
+		if len(page) > requestLimit {
+			return nil, nil, "", &Error{Code: "bad_response", Message: fmt.Sprintf("server returned %d files after a request for at most %d", len(page), requestLimit)}
+		}
 		for _, raw := range page {
 			var f File
 			if err := json.Unmarshal(raw, &f); err != nil {
