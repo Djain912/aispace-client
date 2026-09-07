@@ -69,8 +69,8 @@ brew install aispace-sh/tap/aispace
 go install github.com/aispace-sh/aispace-client@latest
 ```
 
-Pin the shell installer with `AISPACE_VERSION=v1.2.3`. Release binaries support macOS and Linux on
-amd64 and arm64.
+Pin the shell installer with `AISPACE_VERSION=v1.2.3`. Release binaries support macOS, Linux, and
+Windows on amd64 and arm64. The shell installer supports macOS and Linux; use npm on Windows.
 
 <div align="center">
   <a href="https://x.ai/bot/suv5xSPPbQmzi02LF7Z9Z">
@@ -203,8 +203,8 @@ welcome—start with [`CONTRIBUTING.md`](CONTRIBUTING.md), check the [`ROADMAP.m
 review the [`CHANGELOG.md`](CHANGELOG.md). Focused bug reports and feature proposals can use the
 repository's structured issue forms.
 
-Releases are cut through the manual GitHub Actions workflow. GoReleaser builds checksummed macOS and
-Linux binaries, updates the Homebrew tap, and publishes `@aispace-sh/cli` to npm. See
+Releases are cut through the manual GitHub Actions workflow. GoReleaser builds checksummed macOS,
+Linux, and Windows binaries, updates the Homebrew tap, and publishes `@aispace-sh/cli` to npm. See
 [`RELEASE.md`](RELEASE.md) for publisher configuration and the release checklist.
 
 ## Security

@@ -11,6 +11,7 @@ Versioning, and release entries are derived from the immutable Git tag and GitHu
 - Local age X25519 key generation, encryption, and decryption workflows.
 - Codex-compatible agent skill and agent integration reference.
 - Runnable report-sharing, encrypted-handoff, and CI examples.
+- Windows amd64 and arm64 release binaries with npm installation support.
 
 ### Changed
 

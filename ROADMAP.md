@@ -6,7 +6,7 @@ large item helps confirm the intended shape.
 
 ## Now: dependable first release
 
-- Publish signed, checksum-verified binaries for macOS and Linux on amd64 and arm64.
+- Publish checksum-verified binaries for macOS, Linux, and Windows on amd64 and arm64.
 - Publish matching npm and Homebrew packages from the same immutable GitHub release.
 - Keep CLI output, JSON shapes, errors, and exit codes stable and documented.
 - Validate the Codex skill and agent integration examples against the published client.
@@ -14,7 +14,7 @@ large item helps confirm the intended shape.
 ## Next: easier integrations
 
 - Add copyable examples for more CI systems and agent runtimes.
-- Evaluate Windows binaries and a native package-manager channel.
+- Evaluate Windows code signing and a native package-manager channel.
 - Add opt-in shell completion installation.
 - Improve diagnostics for network, quota, and configuration failures.
 

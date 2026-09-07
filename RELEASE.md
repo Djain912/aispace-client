@@ -32,11 +32,20 @@ downloads the native binary and `checksums.txt` from that GitHub release. GoRele
 
 ## Verify
 
+On macOS or Linux:
+
 ```sh
 npm install -g @aispace-sh/cli
 aispace version
 
 brew install aispace-sh/tap/aispace
+aispace version
+```
+
+On Windows, verify the npm package from PowerShell:
+
+```powershell
+npm install -g @aispace-sh/cli
 aispace version
 ```
 

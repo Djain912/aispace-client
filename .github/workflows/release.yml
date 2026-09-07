@@ -186,9 +186,16 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   verify:
-    name: Verify published package
+    name: Verify published package (${{ matrix.os }})
     needs: [validate, npm]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -205,4 +212,5 @@ jobs:
             fi
             sleep 10
           done
-          test "$(aispace version --json | jq -r .version)" = "$VERSION"
+          ACTUAL_VERSION="$(aispace version --json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')"
+          test "$ACTUAL_VERSION" = "$VERSION"
