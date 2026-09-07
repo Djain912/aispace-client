@@ -370,10 +370,8 @@ func (a *app) runBatch(ids []string, keepGoing bool, verb string, op func(string
 		if err := op(id); err != nil {
 			err = prefixID(id, multi, err)
 			if !keepGoing || batchIsHopeless(err) {
-				// Report what has already been attempted before giving up.
-				if first != nil {
-					return first
-				}
+				// Earlier recoverable failures were already reported. Return the
+				// current fatal error so its message and stronger exit code win.
 				return err
 			}
 			_, code := a.classify(err)
