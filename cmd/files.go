@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -234,59 +235,98 @@ func (a *app) linksCmd() *cobra.Command {
 }
 
 func (a *app) rmCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "rm <file_id>...",
+	var keepGoing bool
+	cmd := &cobra.Command{
+		Use:   "rm <file_id>... [--continue]",
 		Short: "Delete one or more files (revokes all their links)",
-		Long:  "Deletes files in order and stops at the first failure. With --json prints one {\"deleted\": id} object per line.",
-		Args:  minArgs(1, "<file_id>..."),
+		Long: "Deletes files in order. By default it stops at the first failure, so the IDs after\n" +
+			"it are left alone. With --continue every ID is attempted and the command still\n" +
+			"exits non-zero if any of them failed, which suits cleaning up a list that may\n" +
+			"contain IDs already deleted or expired.\n\n" +
+			"With --json it prints one {" + `"deleted"` + ": id} object per line.",
+		Args: minArgs(1, "<file_id>..."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.client()
 			if err != nil {
 				return err
 			}
-			for _, id := range args {
-				if err := c.DeleteFile(cmd.Context(), id); err != nil {
-					return prefixID(id, len(args) > 1, err)
-				}
-				if a.jsonOut {
-					if err := a.printJSONValue(map[string]any{"deleted": id}); err != nil {
-						return err
-					}
-					continue
-				}
-				fmt.Fprintf(a.stdout, "deleted %s\n", id)
-			}
-			return nil
+			return a.runBatch(args, keepGoing, "deleted", func(id string) error {
+				return c.DeleteFile(cmd.Context(), id)
+			})
 		},
 	}
+	cmd.Flags().BoolVar(&keepGoing, "continue", false, "attempt every ID instead of stopping at the first failure")
+	return cmd
 }
 
 func (a *app) revokeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "revoke <link_id>...",
+	var keepGoing bool
+	cmd := &cobra.Command{
+		Use:   "revoke <link_id>... [--continue]",
 		Short: "Revoke one or more share links",
-		Long:  "Revokes links in order and stops at the first failure. With --json prints one {\"revoked\": id} object per line.",
-		Args:  minArgs(1, "<link_id>..."),
+		Long: "Revokes links in order. By default it stops at the first failure; with --continue\n" +
+			"every ID is attempted and the command still exits non-zero if any of them failed.\n\n" +
+			"With --json it prints one {" + `"revoked"` + ": id} object per line.",
+		Args: minArgs(1, "<link_id>..."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.client()
 			if err != nil {
 				return err
 			}
-			for _, id := range args {
-				if err := c.RevokeLink(cmd.Context(), id); err != nil {
-					return prefixID(id, len(args) > 1, err)
-				}
-				if a.jsonOut {
-					if err := a.printJSONValue(map[string]any{"revoked": id}); err != nil {
-						return err
-					}
-					continue
-				}
-				fmt.Fprintf(a.stdout, "revoked %s\n", id)
-			}
-			return nil
+			return a.runBatch(args, keepGoing, "revoked", func(id string) error {
+				return c.RevokeLink(cmd.Context(), id)
+			})
 		},
 	}
+	cmd.Flags().BoolVar(&keepGoing, "continue", false, "attempt every ID instead of stopping at the first failure")
+	return cmd
+}
+
+// runBatch applies op to each ID, reporting one line per success. Without
+// keepGoing it returns at the first failure, leaving the remaining IDs
+// untouched. With keepGoing it reports each failure as it happens and returns
+// the first one at the end, so the exit code still reflects that something
+// failed.
+func (a *app) runBatch(ids []string, keepGoing bool, verb string, op func(string) error) error {
+	multi := len(ids) > 1
+	var first error
+	for _, id := range ids {
+		if err := op(id); err != nil {
+			err = prefixID(id, multi, err)
+			if !keepGoing || batchIsHopeless(err) {
+				// Report what has already been attempted before giving up.
+				if first != nil {
+					return first
+				}
+				return err
+			}
+			_, code := a.classify(err)
+			a.printError(err, code)
+			if first == nil {
+				first = &reportedError{err: err}
+			}
+			continue
+		}
+		if a.jsonOut {
+			if err := a.printJSONValue(map[string]any{verb: id}); err != nil {
+				return err
+			}
+			continue
+		}
+		fmt.Fprintf(a.stdout, "%s %s\n", verb, id)
+	}
+	return first
+}
+
+// batchIsHopeless reports whether an error will affect every remaining ID, so
+// there is nothing to gain from trying them. A rejected key or an exhausted
+// rate limit applies to the whole batch; a missing ID does not.
+func batchIsHopeless(err error) bool {
+	var ae *api.Error
+	if errors.As(err, &ae) {
+		return ae.Status == http.StatusUnauthorized || ae.Status == http.StatusTooManyRequests
+	}
+	return false
 }
 
 func (a *app) quotaCmd() *cobra.Command {

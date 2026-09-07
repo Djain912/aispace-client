@@ -58,6 +58,14 @@ func usagef(format string, args ...any) error {
 	return &usageError{msg: fmt.Sprintf(format, args...)}
 }
 
+// reportedError wraps an error that has already been written to stderr, so Run
+// does not print it a second time. It keeps the wrapped error reachable through
+// errors.As, so the exit code is still derived from the original.
+type reportedError struct{ err error }
+
+func (e *reportedError) Error() string { return e.err.Error() }
+func (e *reportedError) Unwrap() error { return e.err }
+
 // codedError is a local (non-API) error with a code for the `error: msg (code)` line.
 type codedError struct {
 	code string
@@ -84,7 +92,10 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, version strin
 		return ExitOK
 	}
 	code, apiCode := a.classify(err)
-	a.printError(err, apiCode)
+	var reported *reportedError
+	if !errors.As(err, &reported) {
+		a.printError(err, apiCode)
+	}
 	return code
 }
 
