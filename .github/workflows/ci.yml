@@ -42,6 +42,9 @@ jobs:
       - name: Check shell scripts
         run: sh -n install.sh examples/*.sh
         if: runner.os == 'Linux'
+      - name: Validate documentation inventory
+        run: node scripts/validate-index-json.mjs .
+        if: runner.os == 'Linux'
       - name: Test npm wrapper
         working-directory: npm
         run: npm test && npm pack --dry-run
