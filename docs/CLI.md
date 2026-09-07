@@ -221,7 +221,7 @@ file may have been stored.
 ### `aispace download`
 
 ```
-aispace download <file_id> --output <path|-> [--json]
+aispace download <file_id> --output <path|-> [--verify] [--json]
 ```
 
 Downloads a file owned by the current key or shared with the account by another key. This uses
@@ -231,6 +231,26 @@ it cannot be combined with `--json`.
 
 ```sh
 aispace download 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --output report.pdf
+aispace download 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --output report.pdf --verify
+```
+
+`--verify` hashes the bytes as they are written and compares the result with the SHA-256 the API
+recorded for the file, so a truncated or altered transfer is caught rather than trusted. It reads
+the file's metadata first, which costs **one extra request** against the per-minute rate limit, and
+only works for files uploaded with `--sha256` — without a recorded digest there is nothing to
+compare against and the command exits 1 with `no_checksum` rather than reporting a check it did
+not perform.
+
+On a mismatch the exit code is 1 with `checksum_mismatch`, and the output file is removed, so a
+caller that ignores the exit code cannot pick up a corrupt file. With `--output -` the bytes have
+already gone to stdout by the time the digest is known; the mismatch is still reported and the
+exit code is still 1, but the caller has to discard what it read.
+
+```sh
+aispace download "$id" --output report.pdf --verify || echo "corrupt, nothing written"
+
+# --json adds the digest that was verified
+aispace download "$id" --output report.pdf --verify --json | jq -r .sha256
 ```
 
 ### `aispace keygen`

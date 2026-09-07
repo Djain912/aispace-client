@@ -122,6 +122,7 @@ aispace upload notes.md --shared --json
 # Receive, manage, and revoke.
 aispace ls --json
 aispace download <file_id> --output ./file
+aispace download <file_id> --output ./file --verify   # check the recorded SHA-256
 aispace link <file_id> --expires 30m --max-downloads 1
 aispace revoke <link_id>
 aispace rm <file_id>

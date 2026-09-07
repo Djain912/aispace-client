@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,10 +19,18 @@ import (
 
 func (a *app) downloadCmd() *cobra.Command {
 	var output string
+	var verify bool
 	cmd := &cobra.Command{
-		Use:   "download <file_id> --output <path|->",
+		Use:   "download <file_id> --output <path|-> [--verify]",
 		Short: "Download an accessible file by ID without creating a public link",
-		Args:  exactArgs(1, "<file_id>"),
+		Long: "Downloads a file this key owns or that is shared with the account, using key\n" +
+			"authentication rather than a public link.\n\n" +
+			"With --verify the bytes are hashed as they are written and compared with the\n" +
+			"SHA-256 the API recorded for the file. That costs one extra metadata request, and\n" +
+			"only works for files uploaded with --sha256, because otherwise there is no\n" +
+			"recorded digest to compare against.",
+		Example: "  aispace download 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --output report.pdf --verify",
+		Args:    exactArgs(1, "<file_id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output == "" {
 				return usagef("--output is required")
@@ -30,15 +42,50 @@ func (a *app) downloadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := c.Download(cmd.Context(), args[0])
+			id := args[0]
+
+			// Read the recorded digest before transferring anything: without one
+			// there is nothing to compare against, and saying so now avoids
+			// downloading a body that could never be checked.
+			var want string
+			if verify {
+				res, err := c.GetFile(cmd.Context(), id)
+				if err != nil {
+					return err
+				}
+				if want = res.Value.SHA256; want == "" {
+					return &codedError{
+						code: "no_checksum",
+						err:  fmt.Errorf("file %s has no recorded SHA-256 to verify against; it was uploaded without --sha256", id),
+						exit: ExitGeneric,
+					}
+				}
+			}
+
+			resp, err := c.Download(cmd.Context(), id)
 			if err != nil {
 				return err
 			}
 			defer resp.Body.Close()
-			if output == "-" {
-				_, err = io.Copy(a.stdout, resp.Body)
-				return err
+
+			sum := sha256.New()
+			body := io.Reader(resp.Body)
+			if verify {
+				body = io.TeeReader(resp.Body, sum)
 			}
+
+			if output == "-" {
+				if _, err := io.Copy(a.stdout, body); err != nil {
+					return &codedError{code: "io", err: err, exit: ExitGeneric}
+				}
+				if !verify {
+					return nil
+				}
+				// stdout cannot be taken back, so the exit code is the only
+				// signal left; say so rather than implying the bytes were held.
+				return checkDigest(want, sum, "the bytes were already written to stdout")
+			}
+
 			out, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 			if err != nil {
 				if errors.Is(err, os.ErrExist) {
@@ -53,22 +100,52 @@ func (a *app) downloadCmd() *cobra.Command {
 					_ = os.Remove(output)
 				}
 			}()
-			if _, err = io.Copy(out, resp.Body); err != nil {
+			if _, err = io.Copy(out, body); err != nil {
 				return &codedError{code: "io", err: err, exit: ExitGeneric}
 			}
 			if err = out.Close(); err != nil {
 				return &codedError{code: "io", err: err, exit: ExitGeneric}
 			}
+			if verify {
+				// ok is still false here, so the deferred cleanup removes a
+				// corrupt file rather than leaving it where it may be trusted.
+				if err := checkDigest(want, sum, ""); err != nil {
+					return err
+				}
+			}
 			ok = true
 			if a.jsonOut {
-				return a.printJSONValue(map[string]string{"file_id": args[0], "output": output})
+				payload := map[string]string{"file_id": id, "output": output}
+				if verify {
+					payload["sha256"] = hex.EncodeToString(sum.Sum(nil))
+				}
+				return a.printJSONValue(payload)
 			}
-			fmt.Fprintf(a.stdout, "downloaded %s -> %s\n", args[0], output)
+			if verify {
+				fmt.Fprintf(a.stdout, "downloaded %s -> %s sha256 verified\n", id, output)
+				return nil
+			}
+			fmt.Fprintf(a.stdout, "downloaded %s -> %s\n", id, output)
 			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "destination path, or - for stdout (required)")
+	cmd.Flags().BoolVar(&verify, "verify", false, "check the downloaded bytes against the file's recorded SHA-256 (one extra API call)")
 	return cmd
+}
+
+// checkDigest compares a streamed hash with the digest the API recorded for the
+// file. note describes anything the caller could no longer take back.
+func checkDigest(want string, h hash.Hash, note string) error {
+	got := hex.EncodeToString(h.Sum(nil))
+	if strings.EqualFold(got, want) {
+		return nil
+	}
+	msg := fmt.Sprintf("checksum mismatch: recorded %s, downloaded %s", want, got)
+	if note != "" {
+		msg += " (" + note + ")"
+	}
+	return &codedError{code: "checksum_mismatch", err: errors.New(msg), exit: ExitGeneric}
 }
 
 func (a *app) linkCmd() *cobra.Command {
