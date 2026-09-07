@@ -1,0 +1,17 @@
+# Keep the working tree byte-identical on every platform.
+#
+# Without this, Git's Windows default (core.autocrlf=true) checks every file out
+# with CRLF endings. `gofmt -l .` then reports all Go files as unformatted, so the
+# documented `go test ./... && go vet ./... && test -z "$(gofmt -l .)"` check fails
+# on a clean Windows clone, and install.sh becomes unrunnable by /bin/sh.
+* text=auto eol=lf
+
+# Shell scripts and Go source must be LF even if a contributor overrides the above.
+*.sh   text eol=lf
+*.go   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+
+# Binary assets are never line-ending converted.
+*.png binary
+*.svg text eol=lf
