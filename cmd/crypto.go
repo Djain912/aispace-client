@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"filippo.io/age"
@@ -308,8 +309,14 @@ func (a *app) runDecrypt(ctx context.Context, input string, f decryptFlags) erro
 func (a *app) loadIdentity(path string) (age.Identity, error) {
 	var raw string
 	if path != "" {
-		if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 {
-			fmt.Fprintf(a.stderr, "warning: identity file %s is readable by other users; run chmod 600 %s\n", path, path)
+		// Windows has no Unix permission bits: os.Stat reports 0666 for every
+		// file, so this would warn on every decrypt and tell the user to run a
+		// command they do not have. config.Load skips its own permission
+		// warning there for the same reason.
+		if runtime.GOOS != "windows" {
+			if info, err := os.Stat(path); err == nil && info.Mode().Perm()&0o077 != 0 {
+				fmt.Fprintf(a.stderr, "warning: identity file %s has permissions %04o, expected 0600 (run: chmod 600 %s)\n", path, info.Mode().Perm(), path)
+			}
 		}
 		b, err := os.ReadFile(path)
 		if err != nil {
