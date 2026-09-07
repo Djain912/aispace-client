@@ -346,7 +346,7 @@ aispace ls --json | jq -r --argjson t "$(date +%s)" '.files[] | select(.expires_
 ### `aispace rm`
 
 ```
-aispace rm <file_id> [<file_id>...] [--json]
+aispace rm <file_id> [<file_id>...] [--continue] [--json]
 ```
 
 Deletes files (`DELETE /v1/files/:id`). All share links of the file stop working immediately and
@@ -363,17 +363,35 @@ not deleted; the ones already printed were. The exit code is the one for the und
 for `not_found`, 3 for a bad key), and when more than one ID was given the message is prefixed
 with the ID that failed.
 
+`--continue` attempts every ID instead. Failures are reported to stderr as they happen, successes
+still go to stdout, and the command exits non-zero if any ID failed — so a cleanup pass over a list
+that may contain already-deleted or expired IDs completes in one call:
+
+```sh
+aispace ls --json | jq -r '.files[].id' | xargs aispace rm --continue
+```
+
+A failure that applies to every remaining ID still stops the run: a rejected key (`401`) or an
+exhausted rate limit (`429`) would fail for all of them, so `--continue` gives up rather than
+spending the rest of the batch on requests that cannot succeed. A missing ID is not treated that
+way, because it says nothing about the others.
+
+With `--json` the two streams stay separate: stdout carries only `{"deleted": id}` lines, and each
+failure is a JSON error object on stderr, so a caller parsing stdout is never handed a mixed
+stream.
+
 ### `aispace revoke`
 
 ```
-aispace revoke <link_id> [<link_id>...] [--json]
+aispace revoke <link_id> [<link_id>...] [--continue] [--json]
 ```
 
 Revokes share links (`DELETE /v1/links/:id`). The file remains. Link IDs come from
 `upload --link --json`, `link --json`, or `aispace links <file_id>`.
 
 Like `rm`, it prints `revoked <id>` per link (or `{"revoked":"<id>"}` per line with `--json`),
-processes IDs in order and stops at the first failure.
+processes IDs in order, stops at the first failure, and accepts `--continue` to attempt every ID
+instead.
 
 ### `aispace links`
 

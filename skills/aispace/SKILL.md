@@ -124,6 +124,8 @@ can list, inspect, and download the file, but cannot perform these owner-only op
 - List link IDs and counters: `aispace links FILE_ID --json`
 - Revoke a link created by this key: `aispace revoke LINK_ID`
 - Delete a file uploaded by this key and invalidate all its links: `aispace rm FILE_ID`
+- When cleaning up several IDs at once, add `--continue` to `rm` or `revoke`. Without it the
+  first already-deleted or expired ID stops the pass and leaves the rest behind.
 
 Treat revoke and delete as state-changing actions. Do them only when requested or when they are an
 explicit step in the user's stated workflow. Remember that expiry or deletion cannot recall bytes
