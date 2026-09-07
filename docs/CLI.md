@@ -255,7 +255,9 @@ If the server *rejects* the upload (quota, size, rate limit, bad key), a file wr
 leaving it behind would make retrying the same command fail with `identity file already exists`.
 When the request fails without a response or returns a 5xx server error, the outcome is uncertain,
 so the identity is kept and a warning names it — check `aispace ls` before deleting it, because the
-file may have been stored.
+file may have been stored. When no `--identity-out` was supplied, the CLI creates a mode-`0600`
+temporary recovery identity before uploading. It removes that recovery copy after a definite
+success or rejection, but keeps it and prints its path after an uncertain outcome.
 
 ### `aispace download`
 

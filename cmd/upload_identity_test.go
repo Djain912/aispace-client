@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -8,8 +9,14 @@ import (
 	"strings"
 	"testing"
 
+	"filippo.io/age"
+
 	"github.com/aispace-sh/aispace-client/internal/config"
 )
+
+type failingUploadReader struct{}
+
+func (failingUploadReader) Read([]byte) (int, error) { return 0, errors.New("source failed") }
 
 func TestInvalidEncryptedUploadLeavesNoIdentity(t *testing.T) {
 	isolate(t)
@@ -98,6 +105,66 @@ func TestUploadKeepsIdentityWhenOutcomeIsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(r.stderr, "kept identity file") {
 		t.Fatalf("stderr should explain why the file was kept: %q", r.stderr)
+	}
+}
+
+func TestUploadKeepsGeneratedRecoveryIdentityWhenOutcomeIsUnknown(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+	dir := t.TempDir()
+	src := filepath.Join(dir, "secret.pdf")
+	if err := os.WriteFile(src, []byte("confidential"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f.srv.Close()
+	r := run("", "upload", src, "--encrypt")
+	if r.code != ExitGeneric {
+		t.Fatalf("exit = %d, want %d: %+v", r.code, ExitGeneric, r)
+	}
+	const prefix = "warning: kept recovery identity file "
+	start := strings.Index(r.stderr, prefix)
+	if start < 0 {
+		t.Fatalf("stderr should name a recovery identity: %q", r.stderr)
+	}
+	path := strings.SplitN(r.stderr[start+len(prefix):], ";", 2)[0]
+	t.Cleanup(func() { _ = os.Remove(path) })
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read recovery identity: %v", err)
+	}
+	if _, err := age.ParseX25519Identity(strings.TrimSpace(string(raw))); err != nil {
+		t.Fatalf("recovery file does not contain a usable identity: %v", err)
+	}
+}
+
+func TestGeneratedRecoveryIdentityIsTemporaryOnSuccess(t *testing.T) {
+	e, err := encryptForUpload(strings.NewReader("secret"), "secret.txt", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := e.recoveryFile
+	if path == "" {
+		t.Fatal("generated upload has no recovery identity")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("recovery identity was not created: %v", err)
+	}
+	e.cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("recovery identity survived cleanup: %v", err)
+	}
+}
+
+func TestLocalEncryptionFailureRemovesIdentityFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "secret.agekey")
+	_, err := encryptForUpload(failingUploadReader{}, "secret.txt", "", path)
+	if err == nil {
+		t.Fatal("expected encryption to fail")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("identity file survived local encryption failure: %v", err)
 	}
 }
 
