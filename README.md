@@ -2,65 +2,141 @@
   <img src="assets/logo.svg" width="112" height="112" alt="aispace logo">
 </p>
 
-# aispace client
+<h1 align="center">aispace</h1>
 
-The open-source CLI and agent skill for [aispace.sh](https://aispace.sh), a bot-friendly file drop.
-The hosted service is operated separately; this repository contains no server, billing, deployment,
-or customer data. The client is built for humans and LLM agents: one binary, stable exit codes,
-machine-readable JSON, and optional local age encryption.
+<p align="center">
+  <strong>Secure temporary file sharing for AI agents and humans.</strong><br>
+  A scriptable CLI with expiring links, predictable JSON, and optional local age encryption.
+</p>
 
-> 🤖 **Using Grok?** [Add the aispace bot to Grok Bot →](https://x.ai/bot/suv5xSPPbQmzi02LF7Z9Z)
+<p align="center">
+  <a href="https://github.com/aispace-sh/aispace-client/actions/workflows/ci.yml"><img src="https://github.com/aispace-sh/aispace-client/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4c6ef5.svg" alt="MIT license"></a>
+  <a href="https://goreportcard.com/report/github.com/aispace-sh/aispace-client"><img src="https://goreportcard.com/badge/github.com/aispace-sh/aispace-client" alt="Go Report Card"></a>
+</p>
 
-## Install
+<p align="center">
+  <img src="assets/demo.gif" width="760" alt="Example terminal session uploading a report and receiving an expiring aispace link">
+</p>
+
+[aispace.sh](https://aispace.sh) is a bot-friendly file drop for outputs that are too large,
+structured, or temporary for chat. The open-source client is deliberately easy to automate: one
+binary, stable exit codes, streaming uploads, and share URLs printed on a predictable final line.
+
+- **Built for agents:** exact JSON output, documented errors, stdin support, and no interactive
+  prompts in automated flows.
+- **Short-lived by design:** file expiration, separately expiring links, revocation, and optional
+  per-link download caps.
+- **Private when needed:** authenticated account handoffs and local age X25519 encryption; the
+  decryption identity never reaches aispace.
+
+The hosted service is operated separately. This repository contains the client, agent skill, and
+integration examples—not the server, billing system, deployment configuration, or customer data.
+
+## Try it in 60 seconds
+
+Install the latest release:
 
 ```sh
 curl -fsSL https://aispace.sh/install.sh | sh
-# npm
+```
+
+Authenticate with a key created in the aispace dashboard, then store a file:
+
+```sh
+aispace login --key ask_...
+aispace upload report.pdf --json
+```
+
+On a Pro account, add a separately expiring public handoff:
+
+```sh
+aispace upload report.pdf --link --link-expires 1h --max-downloads 1
+```
+
+The URL is printed last on its own line, making it easy for an agent or shell script to capture.
+Add `--json` for a stable machine-readable response. An abridged response looks like:
+
+```json
+{"file":{"id":"...","name":"report.pdf"},"link":{"url":"https://aispace.sh/d/...","expires_at":1757003600}}
+```
+
+Other installation channels:
+
+```sh
 npm install -g @aispace-sh/cli
-# Homebrew
 brew install aispace-sh/tap/aispace
-# pin a version
-AISPACE_VERSION=v1.2.3 curl -fsSL https://aispace.sh/install.sh | sh
-# or with Go
 go install github.com/aispace-sh/aispace-client@latest
 ```
 
-## Quickstart
+Pin the shell installer with `AISPACE_VERSION=v1.2.3`. Release binaries support macOS and Linux on
+amd64 and arm64.
+
+<div align="center">
+  <a href="https://x.ai/bot/suv5xSPPbQmzi02LF7Z9Z">
+    <img src="assets/grok-bot-mark.svg" width="96" height="96" alt="Grok Bot">
+  </a>
+  <h3>Using Grok Bot?</h3>
+  <p>Give Grok Bot a fast, bot-friendly way to share files with aispace.</p>
+  <p>
+    <a href="https://x.ai/bot/suv5xSPPbQmzi02LF7Z9Z"><strong>Add the aispace bot to Grok Bot →</strong></a>
+  </p>
+</div>
+
+---
+
+## Give aispace to an agent
+
+The repository includes a reusable Codex-compatible skill. Clone the repository and link the skill
+into your personal Codex skills directory:
 
 ```sh
-aispace login --key ask_...                 # validates and saves ~/.config/aispace/config.json (0600)
-aispace upload report.pdf --expires 7d --link --link-expires 1h --max-downloads 3
-aispace upload notes.md                         # inherits account key-sharing setting
-aispace upload secret.txt --private             # visible only to this key
-echo "hello" | aispace upload - --name note.txt --link    # stdin; the URL is the last line
-aispace upload secret.pdf --encrypt --identity-out secret.agekey --link
-aispace keygen --identity-out receiver.agekey   # prints the public age1... recipient
-aispace decrypt https://aispace.sh/d/... --identity-file secret.agekey --output secret.pdf
-aispace ls                                  # all pages; --all accepted as a no-op
-aispace info <file_id>
-aispace download <file_id> --output ./file       # authenticated; no public link
-aispace link <file_id> --expires 30m --max-downloads 1
-aispace links <file_id>                     # list links (URLs are only shown at creation)
-aispace revoke <link_id> [<link_id>...]
-aispace rm <file_id> [<file_id>...]
-aispace quota
-aispace whoami
-aispace version
-aispace completion bash|zsh|fish
+git clone https://github.com/aispace-sh/aispace-client.git
+mkdir -p ~/.codex/skills
+ln -s "$PWD/aispace-client/skills/aispace" ~/.codex/skills/aispace
 ```
 
-`upload` flags: `--name`, `--expires`, `--content-type` (default guessed from extension), `--sha256`
-(sends `X-SHA256` for server-side verification), `--link`, `--link-expires`, `--max-downloads`,
-`--private`, `--shared`, `--encrypt`, `--recipient`, and `--identity-out`.
-Uploads stream from disk; stdin (`-`) is buffered to a temp file so `Content-Length` is known.
-Encrypted uploads use age X25519 locally, spool ciphertext to a mode-0600 temp file, hash it, and
-store it as `<name>.age`; the secret identity is never sent to the API.
+Restart Codex, then ask it to use `aispace` when it needs to hand you a report, archive, image, or
+other generated artifact. The skill defaults to account-private storage unless you request a public
+link, prefers short expirations, and treats encryption identities as credentials.
 
-With `--link` the share URL is always printed **last on its own line**, so an agent can take the last
-line of stdout. With `--json` the output is exactly the API JSON; `upload --link --json` prints
-`{"file": File, "link": ShareLink}` and `ls --json` prints `{"files": [...all pages], "next_cursor": null}`.
-Encrypted upload JSON adds `"encryption"` with the public recipient and either a generated secret
-identity or its saved path. Treat the identity as a credential.
+For custom agent runtimes, [`docs/LLM_USAGE.md`](docs/LLM_USAGE.md) includes a system-prompt snippet,
+OpenAI/Anthropic-compatible tool schemas, and a reference Python handler. See [`examples`](examples)
+for runnable shell, CI, and encrypted-handoff recipes.
+
+## Common workflows
+
+```sh
+# Upload text from stdin and return an expiring public link (Pro).
+echo "hello" | aispace upload - --name note.txt --link --link-expires 1h
+
+# Keep a file available only to this key.
+aispace upload secret.txt --private
+
+# Share ciphertext; keep the generated age identity locally.
+aispace upload secret.pdf --encrypt --identity-out secret.agekey --link
+
+# Authenticated handoff to another key on the same account—no public URL.
+aispace upload notes.md --shared --json
+
+# Receive, manage, and revoke.
+aispace ls --json
+aispace download <file_id> --output ./file
+aispace link <file_id> --expires 30m --max-downloads 1
+aispace revoke <link_id>
+aispace rm <file_id>
+```
+
+The complete command reference is in [`docs/CLI.md`](docs/CLI.md); the HTTP contract is in
+[`docs/API.md`](docs/API.md).
+
+`upload` accepts `--name`, `--expires`, `--content-type`, `--sha256`, `--link`, `--link-expires`,
+`--max-downloads`, `--private`, `--shared`, `--encrypt`, `--recipient`, and `--identity-out`.
+Uploads stream from disk. Encrypted uploads use age X25519 locally and store ciphertext as
+`<name>.age`; the secret identity is never sent to the API.
+
+With `--json`, errors also remain structured and are written to stderr. `upload --link --json`
+returns `{"file": File, "link": ShareLink}`; encrypted uploads add an `"encryption"` object.
 
 ## Configuration
 
@@ -116,19 +192,19 @@ Errors go to stderr as `error: <message> (<code>)`; with `--json` they are a JSO
 ## Development
 
 ```sh
-go test ./... && go vet ./... && test -z "$(gofmt -l .)"
+go test -race ./... && go vet ./... && test -z "$(gofmt -l .)"
 go build -ldflags "-X main.version=0.0.0-dev" -o aispace .
+(cd npm && npm test && npm pack --dry-run)
 ```
 
-Releases are cut through the manual GitHub Actions workflow; `.goreleaser.yaml` builds darwin/linux amd64/arm64 assets
-and checksums, updates the Homebrew tap, and the release workflow publishes `@aispace-sh/cli` to npm.
-See [`RELEASE.md`](RELEASE.md) for the one-time publisher configuration and release checklist.
+The test suite uses local HTTP fixtures and does not require an aispace key. Contributions are
+welcome—start with [`CONTRIBUTING.md`](CONTRIBUTING.md), check the [`ROADMAP.md`](ROADMAP.md), and
+review the [`CHANGELOG.md`](CHANGELOG.md). Focused bug reports and feature proposals can use the
+repository's structured issue forms.
 
-## Agent skill
-
-The reusable Codex-compatible skill lives in [`skills/aispace`](skills/aispace). Its instructions
-keep uploads within user-authorized scope, prefer short-lived links, and treat encryption identities
-as credentials.
+Releases are cut through the manual GitHub Actions workflow. GoReleaser builds checksummed macOS and
+Linux binaries, updates the Homebrew tap, and publishes `@aispace-sh/cli` to npm. See
+[`RELEASE.md`](RELEASE.md) for publisher configuration and the release checklist.
 
 ## Security
 

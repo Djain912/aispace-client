@@ -39,7 +39,8 @@ jobs:
       - run: go test ./...
         if: runner.os != 'Linux'
       - run: go build -trimpath -o aispace .
-      - run: sh -n install.sh
+      - name: Check shell scripts
+        run: sh -n install.sh examples/*.sh
         if: runner.os == 'Linux'
       - name: Test npm wrapper
         working-directory: npm

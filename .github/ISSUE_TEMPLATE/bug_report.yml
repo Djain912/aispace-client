@@ -1,0 +1,70 @@
+name: Bug report
+description: Report a reproducible problem with the aispace client
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve aispace. Remove API keys, private links, file IDs, and age identities from everything you submit. Report security vulnerabilities through a private GitHub Security Advisory instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the behavior and what you expected instead.
+      placeholder: A concise description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Provide the smallest sanitized command sequence that reproduces the problem.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: aispace version
+      description: Output of `aispace version`; do not include credentials.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - Shell installer
+        - npm
+        - Homebrew
+        - go install
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, version, and architecture.
+      placeholder: macOS 15, arm64
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized output
+      description: Paste relevant stdout/stderr after removing credentials and identifiers.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed API keys, private links, file IDs, and encryption identities.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

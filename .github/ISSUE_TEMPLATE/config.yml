@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/aispace-sh/aispace-client/security/advisories/new
+    about: Report vulnerabilities, exposed credentials, and private-link weaknesses privately.
+  - name: Usage and API documentation
+    url: https://github.com/aispace-sh/aispace-client/tree/main/docs
+    about: Review the CLI, HTTP API, agent, and security documentation before filing an issue.

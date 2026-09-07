@@ -45,7 +45,7 @@ homebrew_casks:
     ids: [tarballs]
     binaries: [aispace]
     homepage: "https://aispace.sh"
-    description: "Bot-friendly file drop with expiring links"
+    description: "Secure temporary file sharing for AI agents and humans"
     repository:
       owner: aispace-sh
       name: homebrew-tap

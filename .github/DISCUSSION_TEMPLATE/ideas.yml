@@ -1,0 +1,26 @@
+title: "Idea: "
+labels:
+  - ideas
+body:
+  - type: markdown
+    attributes:
+      value: Use this space for early workflow ideas. File a feature request once the desired behavior is concrete.
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow
+      description: What are you trying to hand off, to whom, and for how long?
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: Current friction
+      description: What is unsafe, unreliable, or unnecessarily difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: success
+    attributes:
+      label: Successful outcome
+      description: What would a good command or agent interaction look like?

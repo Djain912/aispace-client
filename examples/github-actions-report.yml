@@ -1,0 +1,36 @@
+name: Share test report
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run tests
+        run: |
+          mkdir -p artifacts
+          go test ./... > artifacts/test-report.txt
+      - name: Install aispace
+        env:
+          AISPACE_VERSION: v0.1.0
+        run: curl -fsSL https://aispace.sh/install.sh | sh
+      - name: Upload report
+        env:
+          AISPACE_KEY: ${{ secrets.AISPACE_KEY }}
+        run: |
+          result=$(aispace upload artifacts/test-report.txt \
+            --link --link-expires 1h --max-downloads 3 --json)
+          url=$(printf '%s' "$result" | jq -r '.link.url')
+          expires=$(printf '%s' "$result" | jq -r '.link.expires_at')
+          {
+            echo "## Test report"
+            echo
+            echo "[Download the report]($url)"
+            echo
+            echo "The link expires at Unix timestamp \`$expires\` and allows at most 3 downloads."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,53 @@
+# Contributing to aispace
+
+Thank you for helping make secure temporary file sharing easier to automate. Bug reports, focused
+feature proposals, documentation fixes, tests, and portability improvements are welcome.
+
+## Before opening an issue
+
+- Search existing issues and the [`ROADMAP.md`](ROADMAP.md). Maintainers can publish the prepared
+  [`good first issue` drafts](docs/GOOD_FIRST_ISSUES.md) as capacity allows.
+- Use GitHub Security Advisories—not a public issue—for vulnerabilities or exposed credentials.
+- Remove API keys, private links, file IDs, and encryption identities from logs and screenshots.
+- Include `aispace version`, operating system, architecture, installation method, and the smallest
+  reproducible command when reporting a bug.
+
+## Local development
+
+The Go and npm tests use local HTTP fixtures and do not require an aispace account or production
+credentials.
+
+```sh
+git clone https://github.com/aispace-sh/aispace-client.git
+cd aispace-client
+go test -race ./...
+go vet ./...
+test -z "$(gofmt -l .)"
+(cd npm && npm test && npm pack --dry-run)
+```
+
+Build a local binary with:
+
+```sh
+go build -ldflags "-X main.version=0.0.0-dev" -o aispace .
+./aispace version
+```
+
+Tests that exercise the hosted service must use a dedicated low-budget key. Never commit a key or
+place it in a fixture, command transcript, issue, or pull-request description.
+
+## Pull requests
+
+Keep each pull request focused on one behavior. Add or update tests for behavior changes and update
+the CLI/API documentation when a public flag, response, error, or exit code changes. Before opening
+the pull request, run the same checks listed above.
+
+Commit messages should use a concise Conventional Commit subject, such as:
+
+```text
+feat: add resumable downloads
+fix: preserve exit code on link failure
+docs: add CI report example
+```
+
+By contributing, you agree that your contribution is licensed under the repository's MIT license.

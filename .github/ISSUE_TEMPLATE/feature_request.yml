@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a focused improvement to the aispace client or agent skill
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow is difficult today? Describe the outcome, not only a proposed flag.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Show the command or agent interaction you would like to use.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or other designs have you tried?
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Primary surface
+      options:
+        - CLI
+        - JSON or exit-code contract
+        - Agent skill
+        - Documentation or examples
+        - Installation or release packaging
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: I checked the roadmap and existing issues for similar proposals.
+          required: true
+        - label: The proposal is compatible with temporary—not permanent—file storage.
+          required: true
