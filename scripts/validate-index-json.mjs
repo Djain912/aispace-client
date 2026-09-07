@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const supported = new Set(['.md', '.markdown', '.mdx', '.json']);
+const markdown = new Set(['.md', '.markdown', '.mdx']);
 const knownSections = new Set(['main', 'guides', 'architecture', 'reference']);
 const repoRoot = path.resolve(process.argv[2] || '.');
 const docsRoot = path.join(repoRoot, 'docs');
@@ -15,13 +16,17 @@ function isSupported(file) {
   return supported.has(path.extname(file).toLowerCase());
 }
 
-function walk(dir, base = '') {
+function isMarkdown(file) {
+  return markdown.has(path.extname(file).toLowerCase());
+}
+
+function walk(dir, base = '', include = isSupported) {
   const files = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith('.')) continue;
     const relative = base ? `${base}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) files.push(...walk(path.join(dir, entry.name), relative));
-    if (entry.isFile() && isSupported(entry.name) && entry.name !== 'index.json') files.push(relative);
+    if (entry.isDirectory()) files.push(...walk(path.join(dir, entry.name), relative, include));
+    if (entry.isFile() && include(entry.name) && entry.name !== 'index.json') files.push(relative);
   }
   return files;
 }
@@ -31,6 +36,11 @@ function resolveSource(source) {
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
   }
   return null;
+}
+
+function normalizeSource(source) {
+  const relative = source.replace(/^\.\//, '');
+  return relative.startsWith('docs/') ? relative.slice('docs/'.length) : relative;
 }
 
 function expandWildcard(section, source) {
@@ -63,6 +73,12 @@ if (!index || typeof index !== 'object' || Array.isArray(index)) {
 }
 
 const reachable = new Set();
+function addReachable(source) {
+  const normalized = normalizeSource(source);
+  if (reachable.has(normalized)) errors.push(`duplicate entry: ${normalized}`);
+  else reachable.add(normalized);
+}
+
 for (const [section, rawEntries] of Object.entries(index)) {
   if (!knownSections.has(section)) warnings.push(`unknown section ${section}`);
   const entries = Array.isArray(rawEntries) ? rawEntries : [rawEntries];
@@ -72,18 +88,18 @@ for (const [section, rawEntries] of Object.entries(index)) {
   }
   for (const source of entries) {
     if (/^https?:\/\//i.test(source)) continue;
-    if (source === '*' || source.endsWith('/*')) {
-      for (const file of expandWildcard(section, source)) reachable.add(file);
+    const normalized = normalizeSource(source);
+    if (normalized === '*' || normalized.endsWith('/*')) {
+      for (const file of expandWildcard(section, normalized)) addReachable(file);
       continue;
     }
-    if (!isSupported(source)) errors.push(`${source} has an unsupported extension`);
-    if (!resolveSource(source)) errors.push(`dead entry: ${source}`);
-    else if (reachable.has(source)) errors.push(`duplicate entry: ${source}`);
-    else reachable.add(source);
+    if (!isSupported(normalized)) errors.push(`${source} has an unsupported extension`);
+    if (!resolveSource(normalized)) errors.push(`dead entry: ${source}`);
+    else addReachable(normalized);
   }
 }
 
-const onDisk = new Set(walk(docsRoot));
+const onDisk = new Set(walk(docsRoot, '', isMarkdown));
 if (fs.existsSync(path.join(repoRoot, 'README.md'))) onDisk.add('README.md');
 for (const orphan of [...onDisk].filter((file) => !reachable.has(file)).sort()) {
   errors.push(`orphan document: ${orphan}`);
