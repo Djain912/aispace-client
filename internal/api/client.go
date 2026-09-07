@@ -147,7 +147,7 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 		if err != nil {
 			return nil, networkError(err)
 		}
-		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+		if resp.StatusCode == http.StatusOK {
 			return resp, nil
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
@@ -165,6 +165,9 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 			}
 			req = req.Clone(req.Context())
 			continue
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			return nil, unexpectedStatus(resp.StatusCode, http.StatusOK)
 		}
 		return nil, errorFromResponse(resp, body)
 	}
@@ -358,18 +361,32 @@ func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) 
 			return Result[T]{}, err
 		}
 	}
-	if resp.StatusCode != wantStatus && (resp.StatusCode < 200 || resp.StatusCode > 299) {
+	if resp.StatusCode != wantStatus {
+		if resp.StatusCode >= 200 && resp.StatusCode <= 299 {
+			return Result[T]{}, unexpectedStatus(resp.StatusCode, wantStatus)
+		}
 		return Result[T]{}, errorFromResponse(resp, body)
 	}
 	var out Result[T]
-	if wantStatus == http.StatusNoContent || len(bytes.TrimSpace(body)) == 0 {
+	if wantStatus == http.StatusNoContent {
 		return out, nil
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return Result[T]{}, &Error{Status: resp.StatusCode, Code: "bad_response", Message: "server returned an empty response body"}
 	}
 	out.Raw = json.RawMessage(bytes.TrimSpace(body))
 	if err := json.Unmarshal(body, &out.Value); err != nil {
 		return Result[T]{}, &Error{Status: resp.StatusCode, Code: "bad_response", Message: fmt.Sprintf("cannot decode response: %v", err), cause: err}
 	}
 	return out, nil
+}
+
+func unexpectedStatus(got, want int) *Error {
+	return &Error{
+		Status:  got,
+		Code:    "bad_response",
+		Message: fmt.Sprintf("server returned HTTP %d, expected HTTP %d", got, want),
+	}
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration, sleep func(time.Duration)) error {

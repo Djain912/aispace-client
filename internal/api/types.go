@@ -62,6 +62,13 @@ type Quota struct {
 		Plan           string `json:"plan"`
 		ExtraBlocks    int64  `json:"extra_blocks"`
 	} `json:"account"`
+	Month struct {
+		UploadsUsed    int64 `json:"uploads_used"`
+		UploadsLimit   int64 `json:"uploads_limit"`
+		DownloadsUsed  int64 `json:"downloads_used"`
+		DownloadsLimit int64 `json:"downloads_limit"`
+		PeriodEnd      int64 `json:"period_end"`
+	} `json:"month"`
 	Limits struct {
 		MaxFileBytes      int64 `json:"max_file_bytes"`
 		MaxFileTTLSeconds int64 `json:"max_file_ttl_seconds"`

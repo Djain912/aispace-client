@@ -120,6 +120,7 @@ func TestErrorDecodingAndExitCodes(t *testing.T) {
 		{401, `{"error":{"code":"invalid_key","message":"Invalid key"}}`, "invalid_key", 3, "Invalid key"},
 		{401, ``, "unauthenticated", 3, "Unauthorized (HTTP 401)"},
 		{402, `{"error":{"code":"quota_exceeded","message":"Key budget exceeded","details":{"remaining":0}}}`, "quota_exceeded", 4, "Key budget exceeded"},
+		{400, `{"error":{"code":"file_too_large","message":"too big"}}`, "file_too_large", 4, "too big"},
 		{413, `{"error":{"code":"file_too_large","message":"too big"}}`, "file_too_large", 4, "too big"},
 		{429, `{"error":{"code":"rate_limited","message":"slow down"}}`, "rate_limited", 5, "slow down"},
 		{404, `{"error":{"code":"not_found","message":"nope"}}`, "not_found", 1, "nope"},
@@ -583,5 +584,40 @@ func TestBadJSONResponse(t *testing.T) {
 	var ae *Error
 	if !errors.As(err, &ae) || ae.Code != "bad_response" {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSuccessfulObjectResponseRequiresExpectedStatusAndBody(t *testing.T) {
+	t.Run("unexpected 2xx status", func(t *testing.T) {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})
+		_, err := c.Quota(context.Background())
+		var ae *Error
+		if !errors.As(err, &ae) || ae.Code != "bad_response" || ae.Status != http.StatusNoContent {
+			t.Fatalf("err = %#v", err)
+		}
+	})
+
+	t.Run("empty body", func(t *testing.T) {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		_, err := c.Quota(context.Background())
+		var ae *Error
+		if !errors.As(err, &ae) || ae.Code != "bad_response" || !strings.Contains(ae.Message, "empty") {
+			t.Fatalf("err = %#v", err)
+		}
+	})
+}
+
+func TestDownloadRequiresHTTP200(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	_, err := c.Download(context.Background(), "01A")
+	var ae *Error
+	if !errors.As(err, &ae) || ae.Code != "bad_response" || ae.Status != http.StatusNoContent {
+		t.Fatalf("err = %#v", err)
 	}
 }

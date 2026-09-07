@@ -21,9 +21,17 @@ func (e *Error) Error() string { return e.Message }
 // Unwrap exposes the transport cause, if any.
 func (e *Error) Unwrap() error { return e.cause }
 
-// ExitCode maps the error to the CLI exit code contract:
-// 3 auth (401), 4 quota (402/413), 5 rate limited (429), 1 otherwise.
+// ExitCode maps stable API codes first, then falls back to HTTP status for
+// compatible servers that did not return a structured error.
 func (e *Error) ExitCode() int {
+	switch e.Code {
+	case "invalid_key", "key_revoked", "unauthenticated":
+		return 3
+	case "quota_exceeded", "allowance_exceeded", "payment_required", "file_too_large":
+		return 4
+	case "rate_limited", "monthly_upload_cap", "monthly_download_cap":
+		return 5
+	}
 	switch e.Status {
 	case http.StatusUnauthorized:
 		return 3

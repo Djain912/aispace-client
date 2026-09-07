@@ -45,7 +45,8 @@ curl -fsS -X POST https://aispace.sh/v1/files \
 Optional headers are `X-Expires-In`, `X-SHA256`, and `X-File-Visibility`. Visibility may be
 `private` or `account`; when omitted, the account's key-sharing setting applies. Account sharing
 does not create a public URL. The server requires `Content-Length` and
-returns the stored file metadata as JSON.
+returns the stored file metadata as JSON. It records a SHA-256 for every upload; `X-SHA256` is an
+optional client-provided expectation that makes the server reject a body whose digest differs.
 
 Public access always requires the separate, explicit link-creation endpoint below.
 
@@ -69,6 +70,9 @@ the service retains only a token hash.
 `429` responses include `Retry-After`. The CLI retries one idempotent read at most once and does not
 retry uploads, deletes, link creation, or monthly-cap failures. Effective limits are returned by
 `GET /v1/quota`; clients should not hard-code plan values.
+
+The quota response contains `key`, `account`, `month`, `limits`, and `rate`. The account-wide
+`month` block reports upload/download usage and limits plus `period_end`, the next UTC reset.
 
 For exact request and response types, see [`internal/api/types.go`](../internal/api/types.go) and
 [`internal/api/client.go`](../internal/api/client.go), which are the executable client contract.

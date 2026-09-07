@@ -126,7 +126,7 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v1/links/"):
 		w.WriteHeader(204)
 	case r.Method == "GET" && r.URL.Path == "/v1/quota":
-		_, _ = w.Write([]byte(`{"key":{"budget_bytes":52428800,"used_bytes":1048576,"remaining_bytes":51380224},"account":{"allowance_bytes":104857600,"used_bytes":3145728,"remaining_bytes":101711872,"plan":"free","extra_blocks":0},"limits":{"max_file_bytes":26214400,"max_file_ttl_seconds":2592000,"max_link_ttl_seconds":604800,"uploads_per_hour":60,"uploads_per_day":500,"requests_per_minute":300},"rate":{"uploads_hour_remaining":58,"uploads_day_remaining":490,"requests_minute_remaining":299}}`))
+		_, _ = w.Write([]byte(`{"key":{"budget_bytes":52428800,"used_bytes":1048576,"remaining_bytes":51380224},"account":{"allowance_bytes":104857600,"used_bytes":3145728,"remaining_bytes":101711872,"plan":"free","extra_blocks":0},"month":{"uploads_used":12,"uploads_limit":100,"downloads_used":340,"downloads_limit":1000,"period_end":1759276800},"limits":{"max_file_bytes":26214400,"max_file_ttl_seconds":2592000,"max_link_ttl_seconds":604800,"uploads_per_hour":60,"uploads_per_day":500,"requests_per_minute":300},"rate":{"uploads_hour_remaining":58,"uploads_day_remaining":490,"requests_minute_remaining":299}}`))
 	default:
 		w.WriteHeader(404)
 		_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"no route"}}`))
@@ -796,6 +796,7 @@ func TestUploadQuotaAndSizeErrors(t *testing.T) {
 	}{
 		{402, `{"error":{"code":"quota_exceeded","message":"Key budget exceeded","details":{"remaining":0}}}`, "quota_exceeded"},
 		{402, `{"error":{"code":"allowance_exceeded","message":"Account allowance exceeded"}}`, "allowance_exceeded"},
+		{400, `{"error":{"code":"file_too_large","message":"Max 25 MB"}}`, "file_too_large"},
 		{413, `{"error":{"code":"file_too_large","message":"Max 25 MB"}}`, "file_too_large"},
 	} {
 		f.fail = func(r *http.Request) (int, string) { return tc.status, tc.body }
@@ -976,6 +977,7 @@ func TestQuota(t *testing.T) {
 	for _, want := range []string{
 		"key: used 1.0 MB of 50.0 MB, 49.0 MB remaining",
 		"account: used 3.0 MB of 100.0 MB, 97.0 MB remaining, plan free (extra blocks 0)",
+		"month: uploads 12/100, downloads 340/1000, resets 2025-10-01T00:00:00Z",
 		"limits: max file 25.0 MB, max file ttl 30d, max link ttl 7d, uploads 60/h 500/d, requests 300/min",
 		"rate: uploads remaining 58 this hour, 490 today; requests remaining 299 this minute",
 	} {
