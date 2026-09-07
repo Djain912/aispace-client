@@ -19,20 +19,6 @@ Acceptance criteria:
 - The README in `examples/` links to it.
 - No credential, real file ID, or live private link appears in the fixture.
 
-## Document shell-completion installation
-
-**Labels:** `good first issue`, `documentation`
-
-Add copyable installation snippets for Bash, Zsh, and Fish completions to `docs/CLI.md`. Use the
-existing `aispace completion bash|zsh|fish` command and cover both a temporary current-shell setup
-and a persistent user installation where the shell supports it.
-
-Acceptance criteria:
-
-- Every command can be pasted into the named shell.
-- The guide distinguishes current-session and persistent installation.
-- Existing files are not overwritten without an explicit warning.
-
 ## Add unsupported-platform npm installer coverage
 
 **Labels:** `good first issue`, `testing`

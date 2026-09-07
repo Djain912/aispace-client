@@ -169,7 +169,12 @@ func (a *app) newRootCmd() *cobra.Command {
 		a.quotaCmd(),
 		a.whoamiCmd(),
 		a.versionCmd(),
+		a.completionCmd(),
 	)
+	// Replace cobra's generated completion command with one that can also
+	// install the script. The hidden __complete command it relies on is
+	// unaffected, so dynamic completion keeps working.
+	root.CompletionOptions.DisableDefaultCmd = true
 	return root
 }
 
