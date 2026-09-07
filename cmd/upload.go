@@ -160,6 +160,9 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 		}
 		return err
 	}
+	if encrypted != nil {
+		encrypted.uploadConfirmed()
+	}
 	file := fileRes.Value
 
 	if !f.link {
@@ -221,17 +224,25 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 // even though no success response reached the client. Those identities are
 // kept, and the caller is told why.
 func (a *app) discardUnusedIdentity(e *encryptedUpload, err error) {
-	if e.IdentityFile == "" {
-		return
-	}
 	var ae *api.Error
 	if errors.As(err, &ae) && ae.Status >= 400 && ae.Status < 500 {
 		// The server rejected the request, so no ciphertext exists.
-		if os.Remove(e.IdentityFile) == nil {
+		if e.identityPath == "" || os.Remove(e.identityPath) == nil {
+			e.identityPath = ""
 			return
 		}
+		fmt.Fprintf(a.stderr, "warning: could not remove unused identity file %s\n", e.identityPath)
+		return
 	}
-	fmt.Fprintf(a.stderr, "warning: kept identity file %s; the upload may still have stored the file, so check `aispace ls` before removing it\n", e.IdentityFile)
+	path := e.preserveIdentity()
+	if path == "" {
+		return
+	}
+	label := "identity file"
+	if e.IdentityFile == "" {
+		label = "recovery identity file"
+	}
+	fmt.Fprintf(a.stderr, "warning: kept %s %s; the upload may still have stored the file, so check `aispace ls` before removing it\n", label, path)
 }
 
 func resolvedUploadName(path, nameFlag string) string {

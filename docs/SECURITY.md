@@ -14,7 +14,9 @@ operational configuration are maintained separately.
 
 `aispace upload --encrypt` encrypts locally with age X25519 before upload. The service receives
 ciphertext, not plaintext or the private identity. Generated identity files use mode `0600` and
-are never overwritten.
+are never overwritten. When an identity would normally be printed after upload, the CLI holds a
+mode-`0600` temporary recovery copy until the server outcome is known. It retains and names that
+file only if a network or server failure leaves it uncertain whether ciphertext was stored.
 
 Treat `AGE-SECRET-KEY-...` identities as credentials. Never upload them with their ciphertext.
 Deliver the URL and identity through separate authenticated channels when practical. Encryption
