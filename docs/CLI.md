@@ -555,8 +555,59 @@ AISPACE_URL=http://localhost:8787 AISPACE_KEY=ask_dev... aispace quota
 
 ## Shell completion
 
+```
+aispace completion <bash|zsh|fish|powershell>
+aispace completion install [bash|zsh|fish] [--dir PATH] [--force] [--json]
+```
+
+`aispace completion <shell>` writes the script to stdout. `aispace completion install` writes it to
+the directory that shell already reads, so nothing has to be sourced by hand.
+
+### Persistent installation
+
 ```sh
-aispace completion bash > /etc/bash_completion.d/aispace
-aispace completion zsh > "${fpath[1]}/_aispace"
-aispace completion fish > ~/.config/fish/completions/aispace.fish
+aispace completion install            # shell taken from $SHELL
+aispace completion install zsh        # or name it
+```
+
+The destination follows the XDG variables the rest of the CLI honours, and the path is printed:
+
+| Shell | Destination |
+|---|---|
+| bash | `${XDG_DATA_HOME:-~/.local/share}/bash-completion/completions/aispace` |
+| zsh | `${XDG_DATA_HOME:-~/.local/share}/zsh/site-functions/_aispace` |
+| fish | `${XDG_CONFIG_HOME:-~/.config}/fish/completions/aispace.fish` |
+
+An existing file is **never replaced**; the command exits `2` and names the file, so a hand-edited
+completion is not silently lost. Pass `--force` to replace it, or `--dir` to install somewhere else
+(for example a system-wide `/etc/bash_completion.d`). Only that one file is written.
+
+Two shells need one more step, reported on stderr so stdout stays just the installed path:
+
+- **zsh** reads the directory only if it is on `$fpath`. Add to `~/.zshrc` if missing:
+  ```sh
+  fpath=(~/.local/share/zsh/site-functions $fpath)
+  ```
+- **bash** reads the directory only when the `bash-completion` package is loaded.
+
+Start a new shell afterwards, or re-run the shell's completion init.
+
+### Current session only
+
+Nothing is written to disk; the completions last until the shell exits.
+
+```sh
+source <(aispace completion bash)          # bash
+source <(aispace completion zsh)           # zsh
+aispace completion fish | source           # fish
+```
+
+### PowerShell
+
+PowerShell loads completions from a profile rather than a directory, so `install` does not support
+it and says so. Append the script to your profile instead:
+
+```powershell
+aispace completion powershell | Out-String | Invoke-Expression          # current session
+aispace completion powershell >> $PROFILE                               # persistent
 ```
