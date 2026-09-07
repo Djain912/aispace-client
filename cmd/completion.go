@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -109,31 +110,9 @@ func (a *app) completionInstallCmd() *cobra.Command {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return &codedError{code: "io", err: fmt.Errorf("create completion directory: %w", err), exit: ExitGeneric}
 			}
-			flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
-			if force {
-				flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+			if err := installCompletionFile(path, script.b, force); err != nil {
+				return err
 			}
-			f, err := os.OpenFile(path, flags, 0o644)
-			if err != nil {
-				if os.IsExist(err) {
-					return usagef("completion file already exists: %s (pass --force to replace it)", path)
-				}
-				return &codedError{code: "io", err: fmt.Errorf("write completion: %w", err), exit: ExitGeneric}
-			}
-			ok := false
-			defer func() {
-				_ = f.Close()
-				if !ok {
-					_ = os.Remove(path)
-				}
-			}()
-			if _, err := f.Write(script.b); err != nil {
-				return &codedError{code: "io", err: fmt.Errorf("write completion: %w", err), exit: ExitGeneric}
-			}
-			if err := f.Close(); err != nil {
-				return &codedError{code: "io", err: fmt.Errorf("write completion: %w", err), exit: ExitGeneric}
-			}
-			ok = true
 
 			if a.jsonOut {
 				return a.printJSONValue(completionInstall{Shell: shell, Path: path})
@@ -157,6 +136,62 @@ type byteWriter struct{ b []byte }
 func (w *byteWriter) Write(p []byte) (int, error) {
 	w.b = append(w.b, p...)
 	return len(p), nil
+}
+
+func installCompletionFile(path string, script []byte, force bool) error {
+	if force {
+		return replaceCompletionFile(path, script)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return usagef("completion file already exists: %s (pass --force to replace it)", path)
+		}
+		return completionWriteError(err)
+	}
+	ok := false
+	defer func() {
+		_ = f.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := f.Write(script); err != nil {
+		return completionWriteError(err)
+	}
+	if err := f.Close(); err != nil {
+		return completionWriteError(err)
+	}
+	ok = true
+	return nil
+}
+
+func replaceCompletionFile(path string, script []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".aispace-completion-*")
+	if err != nil {
+		return completionWriteError(err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return completionWriteError(err)
+	}
+	if _, err := tmp.Write(script); err != nil {
+		tmp.Close()
+		return completionWriteError(err)
+	}
+	if err := tmp.Close(); err != nil {
+		return completionWriteError(err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return completionWriteError(err)
+	}
+	return nil
+}
+
+func completionWriteError(err error) error {
+	return &codedError{code: "io", err: fmt.Errorf("write completion: %w", err), exit: ExitGeneric}
 }
 
 // detectShell reads $SHELL, which a login shell sets to the user's shell.
@@ -235,9 +270,13 @@ func xdgDir(env string, fallback ...string) (string, error) {
 func completionHint(shell, dir string) string {
 	switch shell {
 	case "zsh":
-		return fmt.Sprintf("note: zsh reads this directory only if it is on $fpath; add to ~/.zshrc if missing:\n  fpath=(%s $fpath)", dir)
+		return fmt.Sprintf("note: zsh reads this directory only if it is on $fpath; add to ~/.zshrc if missing:\n  fpath=(%s $fpath)", shellQuote(dir))
 	case "bash":
 		return "note: bash reads this directory only when the bash-completion package is loaded"
 	}
 	return ""
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

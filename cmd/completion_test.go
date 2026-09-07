@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -94,6 +95,44 @@ func TestCompletionInstallRefusesToOverwrite(t *testing.T) {
 	}
 }
 
+func TestCompletionInstallForceReplacesSymlinkNotItsTarget(t *testing.T) {
+	isolate(t)
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("must remain unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "aispace.fish")
+	if err := os.Symlink(victim, path); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("creating symlinks is not permitted: %v", err)
+		}
+		t.Fatal(err)
+	}
+
+	r := run("", "completion", "install", "fish", "--dir", dir, "--force")
+	if r.code != ExitOK {
+		t.Fatalf("%+v", r)
+	}
+	gotVictim, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotVictim) != "must remain unchanged\n" {
+		t.Fatalf("symlink target was overwritten: %q", gotVictim)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("completion path is still a symlink")
+	}
+	if got, err := os.ReadFile(path); err != nil || len(got) < 1000 {
+		t.Fatalf("completion was not installed as a regular file: bytes=%d err=%v", len(got), err)
+	}
+}
+
 func TestCompletionInstallJSON(t *testing.T) {
 	isolate(t)
 	dir := t.TempDir()
@@ -175,7 +214,7 @@ func TestCompletionInstallDefaultDirFollowsXDG(t *testing.T) {
 // stays just the installed path.
 func TestCompletionInstallHintGoesToStderr(t *testing.T) {
 	isolate(t)
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "completion path with ' quote")
 	r := run("", "completion", "install", "zsh", "--dir", dir)
 	if r.code != ExitOK {
 		t.Fatalf("%+v", r)
@@ -185,5 +224,8 @@ func TestCompletionInstallHintGoesToStderr(t *testing.T) {
 	}
 	if !strings.Contains(r.stderr, "fpath") {
 		t.Fatalf("stderr should carry the fpath hint: %q", r.stderr)
+	}
+	if want := "fpath=(" + shellQuote(dir) + " $fpath)"; !strings.Contains(r.stderr, want) {
+		t.Fatalf("stderr = %q, want shell-safe hint containing %q", r.stderr, want)
 	}
 }
