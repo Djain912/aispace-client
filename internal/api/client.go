@@ -8,12 +8,52 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// Per-phase timeouts for one request. There is deliberately no deadline on the
+// exchange as a whole: a large file over a slow link is slow, not broken.
+//
+// A single cap covering the body meant transfer time was really a bandwidth
+// floor. At the previous 10 minutes, a 100 MB upload — the documented maximum
+// on Pro — had to sustain roughly 1.4 Mbit/s or fail after transferring most of
+// itself. These bound the phases before any bytes flow instead, so an
+// unreachable or silent server is still given up on quickly.
+const (
+	// DialTimeout bounds establishing the TCP connection.
+	DialTimeout = 30 * time.Second
+	// TLSTimeout bounds the TLS handshake.
+	TLSTimeout = 10 * time.Second
+	// HeaderTimeout bounds the wait for response headers, which is what catches
+	// a server that accepts the connection and then goes quiet.
+	HeaderTimeout = 60 * time.Second
+)
+
+// NewHTTPClient returns the HTTP client used for aispace requests: quick to
+// give up before bytes start moving, patient once they are.
+func NewHTTPClient() *http.Client {
+	return newHTTPClient(DialTimeout, TLSTimeout, HeaderTimeout)
+}
+
+func newHTTPClient(dial, tlsHandshake, header time.Duration) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: dial, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   tlsHandshake,
+			ResponseHeaderTimeout: header,
+			ExpectContinueTimeout: time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConnsPerHost:   2,
+		},
+	}
+}
 
 // MaxRetryAfter caps how long the client waits before retrying a 429.
 const MaxRetryAfter = 30 * time.Second
@@ -37,7 +77,7 @@ func New(baseURL, key, userAgent string) *Client {
 		BaseURL:   strings.TrimRight(baseURL, "/"),
 		Key:       key,
 		UserAgent: userAgent,
-		HTTP:      &http.Client{Timeout: 10 * time.Minute},
+		HTTP:      NewHTTPClient(),
 	}
 }
 

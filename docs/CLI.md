@@ -97,6 +97,25 @@ idempotent `GET`s (`ls`, `quota`, and the metadata lookups). `monthly_upload_cap
 contacts@aispace.sh). Uploads, link creation and deletes are never
 retried automatically; the agent decides. `Retry-After` is echoed in the error message.
 
+## Timeouts
+
+There is **no deadline on a transfer as a whole**. A large file over a slow link is slow, not
+broken, and a single cap covering the response body would really be a bandwidth floor: at a
+ten-minute cap, a 100 MB upload has to sustain about 1.4 Mbit/s or fail after moving most of
+itself.
+
+What is bounded are the phases before any bytes flow, so an unreachable or silent server is still
+given up on quickly:
+
+| Phase | Limit |
+|---|---|
+| TCP connect | 30s |
+| TLS handshake | 10s |
+| Waiting for response headers | 60s |
+
+A stalled transfer is therefore ended by the peer or by the operator, not by a timer:
+`Ctrl-C`/`SIGTERM` cancels in-flight requests and exits `1` with code `interrupted`.
+
 ## Durations
 
 Flags that take a duration accept Go-style strings with an added `d` unit: `30s`, `15m`, `1h`,

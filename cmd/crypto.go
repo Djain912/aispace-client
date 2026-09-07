@@ -11,10 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"filippo.io/age"
 	"github.com/spf13/cobra"
+
+	"github.com/aispace-sh/aispace-client/internal/api"
 )
 
 const (
@@ -345,7 +346,7 @@ func (a *app) openEncryptedInput(ctx context.Context, input string) (io.Reader, 
 			return nil, func() {}, usagef("invalid URL: %v", err)
 		}
 		req.Header.Set("User-Agent", a.userAgent())
-		resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+		resp, err := api.NewHTTPClient().Do(req)
 		if err != nil {
 			return nil, func() {}, &codedError{code: "download", err: err, exit: ExitGeneric}
 		}
