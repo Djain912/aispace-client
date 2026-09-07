@@ -100,8 +100,16 @@ the API's code and message together with the exit code, so a caller can branch o
 | `4` | Quota | `402 quota_exceeded`, `402 allowance_exceeded`, `402 payment_required`, `413 file_too_large` |
 | `5` | Rate limited or monthly cap | `429 rate_limited` after the retry policy below gave up; `429 monthly_upload_cap` / `429 monthly_download_cap` (never retried — the reset is next month) |
 
-Retry policy: on `429 rate_limited` the CLI reads `Retry-After` and retries **once**, only for
-idempotent `GET`s (`ls`, `quota`, and the metadata lookups). `monthly_upload_cap` and
+Retry policy: the CLI retries **once**, and only for idempotent `GET`s (`ls`, `quota`, `download`
+and the metadata lookups), on either of two conditions:
+
+- `429 rate_limited`, waiting the `Retry-After` the server gives (capped at 30s).
+- `502`, `503` or `504` — the availability answers a gateway returns while it is between healthy
+  backends. A `GET` that failed that way changed nothing, so repeating it is safe.
+
+`500` is **not** retried: it usually means the request itself is the problem, so a second attempt
+doubles the load and returns the same error. Writes are never retried either — a `503` may still
+have been applied, and repeating an upload could store the file twice. `monthly_upload_cap` and
 `monthly_download_cap` are never retried — `Retry-After` points at the start of the next UTC month
 — and exit `5` is returned immediately with the server's message (which points at
 contacts@aispace.sh). Uploads, link creation and deletes are never

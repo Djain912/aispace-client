@@ -155,7 +155,7 @@ func (c *Client) Download(ctx context.Context, id string) (*http.Response, error
 		if readErr != nil {
 			return nil, &Error{Code: "network", Message: "reading response: " + readErr.Error(), cause: readErr}
 		}
-		if attempt == 0 && retryableRateLimit(resp, body) {
+		if attempt == 0 && retryableOnce(resp, body) {
 			if err := waitForRetry(req.Context(), retryDelay(resp.Header.Get("Retry-After")), c.Sleep); err != nil {
 				return nil, err
 			}
@@ -343,7 +343,7 @@ func do[T any](c *Client, req *http.Request, wantStatus int) (Result[T], error) 
 	if err != nil {
 		return Result[T]{}, err
 	}
-	if req.Method == http.MethodGet && retryableRateLimit(resp, body) {
+	if req.Method == http.MethodGet && retryableOnce(resp, body) {
 		wait := retryDelay(resp.Header.Get("Retry-After"))
 		if err := waitForRetry(req.Context(), wait, c.Sleep); err != nil {
 			return Result[T]{}, err
@@ -405,8 +405,26 @@ func send(httpc *http.Client, req *http.Request) (*http.Response, []byte, error)
 	return resp, body, nil
 }
 
-func retryableRateLimit(resp *http.Response, body []byte) bool {
-	return resp.StatusCode == http.StatusTooManyRequests && errorFromResponse(resp, body).Code == "rate_limited"
+// retryableOnce reports whether a failed idempotent request is worth exactly
+// one more attempt.
+//
+// A rate limit is retried only when the server called it one: a monthly cap
+// also arrives as 429, but its Retry-After points at the start of the next UTC
+// month, so waiting is pointless.
+//
+// 502, 503 and 504 are the availability answers a gateway gives while it is
+// between healthy backends, and a GET that failed that way has not changed
+// anything, so repeating it is safe. 500 is deliberately excluded: it usually
+// means the request itself is the problem, and retrying only doubles the load
+// while returning the same error.
+func retryableOnce(resp *http.Response, body []byte) bool {
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		return errorFromResponse(resp, body).Code == "rate_limited"
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
 }
 
 func networkError(err error) *Error {
