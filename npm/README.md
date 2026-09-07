@@ -5,6 +5,10 @@ Linux, or Windows and verifies it against the SHA-256 checksums published with t
 release. The CLI creates expiring and revocable file links, emits predictable JSON for automation,
 and can encrypt files locally with age X25519 before upload.
 
+Installer downloads are HTTPS-only and restricted to GitHub release hosts. The binary is streamed
+to a bounded same-directory temporary file, verified, and atomically renamed into place; stalled
+downloads and oversized responses fail without leaving a partial executable.
+
 ```sh
 npm install -g @aispace-sh/cli
 aispace login --key ask_...
