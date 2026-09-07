@@ -211,6 +211,12 @@ path that does not exist is exit 1.
 If the upload succeeds but the link cannot be created, the file line (and, for `--encrypt`, the
 encryption block) is still printed before the error, so the stored file is not lost.
 
+If the server *rejects* the upload (quota, size, rate limit, bad key), a file written by
+`--identity-out` is removed again: nothing was stored, so that identity decrypts nothing, and
+leaving it behind would make retrying the same command fail with `identity file already exists`.
+When the request fails without a response the outcome is unknown, so the identity is kept and a
+warning names it — check `aispace ls` before deleting it, because the file may have been stored.
+
 ### `aispace download`
 
 ```
