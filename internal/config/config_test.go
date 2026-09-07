@@ -3,18 +3,41 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+// permBits reports whether the platform implements Unix permission bits.
+// Windows does not: os.Chmod there only toggles the read-only attribute, so
+// Save cannot produce (and Load cannot observe) mode 0600. Load already skips
+// its permission warning on Windows for the same reason.
+var permBits = runtime.GOOS != "windows"
+
+// setHome redirects config lookups into a temporary directory and clears the
+// environment overrides.
+//
+// It then asserts the redirect actually took effect, because every caller
+// writes to Path(): if the redirect silently failed, the tests below would
+// overwrite the developer's real config file and destroy a saved API key.
 func setHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	// os.UserHomeDir reads USERPROFILE on Windows and HOME everywhere else.
+	// Set both so the redirect holds on every platform.
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("AISPACE_CONFIG", "")
 	t.Setenv(EnvKey, "")
 	t.Setenv(EnvURL, "")
+	p, err := Path()
+	if err != nil {
+		t.Fatalf("Path() while isolating the test: %v", err)
+	}
+	if !strings.HasPrefix(p, dir) {
+		t.Fatalf("config path %s escaped the test home %s; refusing to run so the real config is not overwritten", p, dir)
+	}
 	return dir
 }
 
@@ -45,11 +68,11 @@ func TestSaveCreates0600AndRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Mode().Perm() != 0o600 {
+	if permBits && st.Mode().Perm() != 0o600 {
 		t.Fatalf("perm = %04o, want 0600", st.Mode().Perm())
 	}
 	dst, _ := os.Stat(filepath.Dir(p))
-	if dst.Mode().Perm() != 0o700 {
+	if permBits && dst.Mode().Perm() != 0o700 {
 		t.Fatalf("dir perm = %04o, want 0700", dst.Mode().Perm())
 	}
 	f, warns, err := Load(p)
@@ -67,7 +90,7 @@ func TestSaveCreates0600AndRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ = os.Stat(p)
-	if st.Mode().Perm() != 0o600 {
+	if permBits && st.Mode().Perm() != 0o600 {
 		t.Fatalf("perm after overwrite = %04o", st.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(filepath.Dir(p))
@@ -86,6 +109,9 @@ func TestLoadMissingIsEmpty(t *testing.T) {
 }
 
 func TestLoadWarnsOnLoosePerms(t *testing.T) {
+	if !permBits {
+		t.Skip("Unix permission bits are not implemented on this platform")
+	}
 	setHome(t)
 	p, _ := Path()
 	if err := Save(p, File{Key: "ask_abc"}); err != nil {
@@ -157,6 +183,9 @@ func TestResolvePrecedence(t *testing.T) {
 }
 
 func TestResolveSurfacesPermWarning(t *testing.T) {
+	if !permBits {
+		t.Skip("Unix permission bits are not implemented on this platform")
+	}
 	setHome(t)
 	p, _ := Path()
 	_ = Save(p, File{Key: "ask_file"})

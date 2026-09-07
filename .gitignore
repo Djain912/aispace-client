@@ -1,7 +1,14 @@
+# Build output.
 /aispace
+/aispace.exe
+# Default `go build .` output, named after the module rather than the binary.
+/aispace-client
+/aispace-client.exe
 /dist/
+
 *.agekey
 *.tmp
 .DS_Store
 /npm/bin/aispace
+/npm/bin/aispace.exe
 /npm/*.tgz

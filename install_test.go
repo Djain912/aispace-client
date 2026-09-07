@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -114,6 +115,12 @@ type installerResult struct {
 
 func newInstallerHarness(t *testing.T, goos, arch, downloader, checksum string) *installerHarness {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		// install.sh only supports darwin and linux, and the harness below builds a
+		// hermetic PATH out of symlinks to real POSIX tools, which needs a
+		// privilege Windows does not grant by default.
+		t.Skip("install.sh is a POSIX-only delivery path")
+	}
 	root := t.TempDir()
 	h := &installerHarness{t: t, root: root, binDir: filepath.Join(root, "bin"), installDir: filepath.Join(root, "install"), assetsDir: filepath.Join(root, "assets"), logPath: filepath.Join(root, "tools.log"), os: goos, arch: arch, downloader: downloader, checksum: checksum}
 	for _, dir := range []string{h.binDir, h.installDir, h.assetsDir} {

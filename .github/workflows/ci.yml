@@ -14,8 +14,15 @@ permissions:
 
 jobs:
   test:
-    name: Go
-    runs-on: ubuntu-latest
+    name: Go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -25,9 +32,15 @@ jobs:
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
+      # The race detector needs a C toolchain; keep it on the Linux job, which
+      # covers the same platform-independent races.
       - run: go test -race ./...
+        if: runner.os == 'Linux'
+      - run: go test ./...
+        if: runner.os != 'Linux'
       - run: go build -trimpath -o aispace .
       - run: sh -n install.sh
+        if: runner.os == 'Linux'
       - name: Test npm wrapper
         working-directory: npm
         run: npm test && npm pack --dry-run

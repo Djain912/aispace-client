@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -157,16 +158,31 @@ func (f *fakeServer) count() int {
 	return len(f.requests)
 }
 
-// isolate points HOME/XDG at a temp dir and clears env overrides.
+// permBits reports whether the platform implements Unix permission bits.
+// Windows does not: os.Chmod there only toggles the read-only attribute, so the
+// 0600 files this package writes cannot be observed as 0600.
+var permBits = runtime.GOOS != "windows"
+
+// isolate points HOME/XDG at a temp dir and clears env overrides. It verifies
+// the redirect took effect so a test can never write to the real config file.
 func isolate(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	// os.UserHomeDir reads USERPROFILE on Windows and HOME everywhere else.
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg"))
 	t.Setenv("AISPACE_CONFIG", "")
 	t.Setenv(config.EnvKey, "")
 	t.Setenv(config.EnvURL, "")
 	t.Setenv(identityEnv, "")
+	p, err := config.Path()
+	if err != nil {
+		t.Fatalf("config.Path() while isolating the test: %v", err)
+	}
+	if !strings.HasPrefix(p, dir) {
+		t.Fatalf("config path %s escaped the test home %s; refusing to run so the real config is not overwritten", p, dir)
+	}
 	old := sleep
 	sleep = func(time.Duration) {}
 	t.Cleanup(func() { sleep = old })
@@ -244,7 +260,7 @@ func TestKeygenIdentityFile(t *testing.T) {
 		t.Fatalf("secret leaked or path missing: %+v", out)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if err != nil || (permBits && info.Mode().Perm() != 0o600) {
 		t.Fatalf("identity file: info=%v err=%v", info, err)
 	}
 	r = run("", "keygen", "--identity-out", path)
@@ -359,7 +375,7 @@ func TestLoginWritesConfigAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config not written at XDG path: %v", err)
 	}
-	if st.Mode().Perm() != 0o600 {
+	if permBits && st.Mode().Perm() != 0o600 {
 		t.Fatalf("perm %04o", st.Mode().Perm())
 	}
 	got, _, _ := config.Load(p)
@@ -437,6 +453,9 @@ func TestPrecedenceFlagEnvFile(t *testing.T) {
 }
 
 func TestConfigPermWarning(t *testing.T) {
+	if !permBits {
+		t.Skip("Unix permission bits are not implemented on this platform")
+	}
 	isolate(t)
 	f := newFakeServer(t)
 	p := writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
@@ -528,7 +547,7 @@ func TestEncryptedUploadAndLocalDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identityInfo.Mode().Perm() != 0o600 {
+	if permBits && identityInfo.Mode().Perm() != 0o600 {
 		t.Fatalf("identity mode = %o", identityInfo.Mode().Perm())
 	}
 	req, ciphertext := f.last()
@@ -554,7 +573,7 @@ func TestEncryptedUploadAndLocalDecrypt(t *testing.T) {
 		t.Fatalf("plaintext %q err=%v", got, err)
 	}
 	decryptedInfo, err := os.Stat(decryptedPath)
-	if err != nil || decryptedInfo.Mode().Perm() != 0o600 {
+	if err != nil || (permBits && decryptedInfo.Mode().Perm() != 0o600) {
 		t.Fatalf("decrypted mode/info = %v err=%v", decryptedInfo, err)
 	}
 }
