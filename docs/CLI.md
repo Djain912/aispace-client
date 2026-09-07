@@ -133,6 +133,17 @@ given up on quickly:
 | Waiting for response headers | 60s |
 | Upload/download with no byte progress | 2m |
 
+A transfer that trips the inactivity timer fails with exit `1` and code `timeout`, whether it
+stalled before the body started or part-way through it:
+
+```
+error: transfer stalled without byte progress (timeout)
+error: transfer stalled (timeout)
+```
+
+A partly written output file is removed, so a stalled download never leaves a truncated file
+behind.
+
 `Ctrl-C`/`SIGTERM` cancels in-flight requests, closes stdin to unblock ordinary pipes, and exits `1`
 with code `interrupted`. After the first signal, default handling is restored so a second interrupt
 can terminate a source that cannot be closed cleanly.
