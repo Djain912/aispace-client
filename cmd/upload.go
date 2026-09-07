@@ -124,6 +124,16 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 		}
 		ct = encryptedContentType
 	}
+	// Both values are sent as HTTP headers, so reject anything the transport
+	// would refuse. name may come from --name or from the file's basename, which
+	// on POSIX can legitimately contain a newline.
+	if err := validateHeaderValue("file name", name); err != nil {
+		return err
+	}
+	if err := validateHeaderValue("--content-type", ct); err != nil {
+		return err
+	}
+
 	opts := api.UploadOptions{Name: name, Size: size, ExpiresIn: expiresIn, ContentType: ct}
 	if f.private {
 		opts.Visibility = "private"

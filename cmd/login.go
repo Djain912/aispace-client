@@ -35,6 +35,9 @@ func (a *app) loginCmd() *cobra.Command {
 			if !strings.HasPrefix(key, "ask_") {
 				return usagef("key must start with ask_")
 			}
+			if err := validateKey(key); err != nil {
+				return err
+			}
 			if err := validateServerURL(cfg.URL); err != nil {
 				return err
 			}

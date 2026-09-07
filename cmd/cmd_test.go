@@ -1128,3 +1128,90 @@ func TestFmtBytes(t *testing.T) {
 		}
 	}
 }
+
+// A control character in any value that becomes an HTTP header used to reach
+// the transport, which failed with "invalid header field value". That surfaced
+// as exit 1 with code "network", telling an agent to retry a request that can
+// never succeed. All of these are bad input and must exit 2.
+func TestControlCharactersInHeaderValuesAreUsageErrors(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+	path := filepath.Join(t.TempDir(), "ok.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"name with newline", []string{"upload", path, "--name", "a\nb.txt"}, "file name must not contain control characters"},
+		{"name with CR", []string{"upload", path, "--name", "a\rb.txt"}, "file name must not contain control characters"},
+		{"content type with newline", []string{"upload", path, "--content-type", "text/x\ny"}, "--content-type must not contain control characters"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := run("", c.args...)
+			if r.code != ExitUsage {
+				t.Fatalf("exit = %d, want %d: %+v", r.code, ExitUsage, r)
+			}
+			if !strings.Contains(r.stderr, c.want) {
+				t.Fatalf("stderr = %q, want it to contain %q", r.stderr, c.want)
+			}
+			if strings.Contains(r.stderr, "network") {
+				t.Fatalf("bad input reported as a network fault: %q", r.stderr)
+			}
+		})
+	}
+	if f.count() != 0 {
+		t.Fatalf("no request should have been sent, got %d", f.count())
+	}
+}
+
+// A key read from a file often keeps a trailing newline, and on Windows a CRLF
+// file leaves a \r. That cannot go into an Authorization header.
+func TestControlCharacterInKeyIsUsageError(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	t.Setenv(config.EnvURL, f.srv.URL)
+
+	for _, suffix := range []string{"\n", "\r", "\r\n"} {
+		key := f.key + suffix
+		t.Setenv(config.EnvKey, key)
+		for _, cmd := range []string{"quota", "ls", "whoami", "login"} {
+			r := run("", cmd)
+			if r.code != ExitUsage {
+				t.Errorf("%s with key%q: exit = %d, want %d (%+v)", cmd, suffix, r.code, ExitUsage, r)
+			}
+			if !strings.Contains(r.stderr, "control character") {
+				t.Errorf("%s with key%q: stderr = %q", cmd, suffix, r.stderr)
+			}
+			// The key is a credential and must not be echoed back.
+			if strings.Contains(r.stdout+r.stderr, f.key) {
+				t.Errorf("%s with key%q leaked the key: %q", cmd, suffix, r.stdout+r.stderr)
+			}
+		}
+	}
+	if f.count() != 0 {
+		t.Fatalf("no request should have been sent, got %d", f.count())
+	}
+}
+
+// Values that are unusual but legal in a header must keep working.
+func TestHeaderSafeValuesStillAccepted(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+	path := filepath.Join(t.TempDir(), "ok.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"café.txt", "a b.txt", "a\tb.txt", "sürprise-résumé.pdf"} {
+		r := run("", "upload", path, "--name", name)
+		if r.code != ExitOK {
+			t.Errorf("upload --name %q = %+v, want success", name, r)
+		}
+	}
+}
