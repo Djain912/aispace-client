@@ -189,10 +189,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
       - name: Attach installer
+        if: steps.release_state.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.validate.outputs.tag }}
-        run: gh release upload "$TAG" install.sh --clobber
+        run: gh release upload "$TAG" install.sh
       - name: Verify release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -213,6 +214,12 @@ jobs:
         run: |
           gh api repos/aispace-sh/homebrew-tap/contents/Casks/aispace.rb --jq .content \
             | base64 --decode | grep -F "version \"$VERSION\"" >/dev/null
+      - name: Publish verified GitHub release
+        if: steps.release_state.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false
 
   npm:
     name: Publish npm package

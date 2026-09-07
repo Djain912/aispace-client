@@ -75,6 +75,9 @@ changelog:
       - "^ci:"
 
 release:
+  # Keep partially uploaded releases recoverable. The workflow publishes the
+  # draft only after every required asset and the Homebrew cask are verified.
+  draft: true
   github:
     owner: aispace-sh
     name: aispace-client

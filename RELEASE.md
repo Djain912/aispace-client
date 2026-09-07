@@ -22,7 +22,9 @@ checksum-verified native binaries.
 1. Open **Actions → Release → Run workflow**.
 2. Select the `main` branch and enter a version without the `v` prefix, such as `0.1.0`.
 3. Start the workflow. It validates the version and credentials, runs the Go and npm test suites,
-   performs GoReleaser and npm publication dry runs, and only then creates the tag and publishes.
+   performs GoReleaser and npm publication dry runs, and only then creates the tag. GoReleaser
+   uploads into a draft; the workflow publishes it only after all required assets and the Homebrew
+   cask have been verified.
 4. Confirm the final verification job installs the published npm package and reports the requested
    version.
 
@@ -30,9 +32,9 @@ checksum-verified native binaries.
 
 If a run fails after creating its tag, rerun the workflow from the same `main` commit with the same
 version and select **Resume**. Resume mode refuses a tag that points anywhere else. It removes only
-an incomplete draft GitHub release, preserves an already-published release and npm version, and
-continues whichever publication steps are still safe. The workflow then verifies the native npm
-assets, installer, and Homebrew cask before testing installation again on Linux and Windows.
+an incomplete draft GitHub release, rebuilds that draft, and preserves an already-published release
+and npm version. The workflow verifies the native npm assets, installer, and Homebrew cask before
+publishing the draft and testing installation again on Linux and Windows.
 
 Do not select Resume to rebuild or replace published artifacts. If the published GitHub assets or
 Homebrew cask fail verification, investigate the channel and publish a new patch version.
