@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -143,6 +144,9 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 
 	fileRes, err := c.Upload(cmd.Context(), src, opts)
 	if err != nil {
+		if encrypted != nil {
+			a.discardUnusedIdentity(encrypted, err)
+		}
 		return err
 	}
 	file := fileRes.Value
@@ -195,6 +199,28 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 	a.printLinkLine(linkRes.Value)
 	fmt.Fprintln(a.stdout, linkRes.Value.URL)
 	return nil
+}
+
+// discardUnusedIdentity removes an identity file written for an upload the
+// server refused. Nothing was stored, so the identity decrypts nothing, and
+// leaving it behind makes the obvious retry of the same command fail with
+// "identity file already exists" — a usage error for arguments that were right.
+//
+// A request that failed without a response is different: the file may have been
+// stored anyway, in which case the identity is the only way to ever read it.
+// Those are kept, and the caller is told why.
+func (a *app) discardUnusedIdentity(e *encryptedUpload, err error) {
+	if e.IdentityFile == "" {
+		return
+	}
+	var ae *api.Error
+	if errors.As(err, &ae) && ae.Status >= 400 {
+		// The server rejected the request, so no ciphertext exists.
+		if os.Remove(e.IdentityFile) == nil {
+			return
+		}
+	}
+	fmt.Fprintf(a.stderr, "warning: kept identity file %s; the upload may still have stored the file, so check `aispace ls` before removing it\n", e.IdentityFile)
 }
 
 // openSource returns a seekable reader for path (or stdin buffered to a temp
