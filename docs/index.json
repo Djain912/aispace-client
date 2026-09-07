@@ -1,0 +1,15 @@
+{
+  "main": [
+    "README.md",
+    "LAUNCH.md",
+    "GOOD_FIRST_ISSUES.md"
+  ],
+  "guides": [
+    "LLM_USAGE.md",
+    "SECURITY.md"
+  ],
+  "reference": [
+    "CLI.md",
+    "API.md"
+  ]
+}

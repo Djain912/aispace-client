@@ -94,7 +94,7 @@ func (a *app) keygenCmd() *cobra.Command {
 	return cmd
 }
 
-func encryptForUpload(src io.Reader, originalName, recipientText, identityOut string) (*encryptedUpload, error) {
+func encryptForUpload(src io.Reader, originalName, recipientText, identityOut, recoveryDir string) (*encryptedUpload, error) {
 	var recipient age.Recipient
 	var identity string
 	if recipientText != "" {
@@ -122,7 +122,7 @@ func encryptForUpload(src io.Reader, originalName, recipientText, identityOut st
 		}
 	} else if identity != "" {
 		var err error
-		recoveryFile, err = writeRecoveryIdentity(identity + "\n")
+		recoveryFile, err = writeRecoveryIdentity(recoveryDir, identity+"\n")
 		if err != nil {
 			return nil, err
 		}
@@ -185,8 +185,19 @@ func encryptForUpload(src io.Reader, originalName, recipientText, identityOut st
 	}, nil
 }
 
-func writeRecoveryIdentity(value string) (string, error) {
-	f, err := os.CreateTemp("", "aispace-identity-recovery-*.agekey")
+func writeRecoveryIdentity(dir, value string) (string, error) {
+	if dir == "" {
+		return "", &codedError{code: "config", err: errors.New("recovery identity directory is not configured"), exit: ExitGeneric}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", &codedError{code: "io", err: fmt.Errorf("create recovery identity directory: %w", err), exit: ExitGeneric}
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return "", &codedError{code: "io", err: fmt.Errorf("secure recovery identity directory: %w", err), exit: ExitGeneric}
+		}
+	}
+	f, err := os.CreateTemp(dir, "identity-*.agekey")
 	if err != nil {
 		return "", &codedError{code: "io", err: fmt.Errorf("create recovery identity file: %w", err), exit: ExitGeneric}
 	}
