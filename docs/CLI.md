@@ -97,7 +97,7 @@ the API's code and message together with the exit code, so a caller can branch o
 | `1` | Generic failure | Network error, 5xx, unexpected response, file not found locally |
 | `2` | Usage error | Bad flag, missing argument, unparsable duration, control character in the key, `--name` or `--content-type` |
 | `3` | Authentication | No key configured, `401 invalid_key`, `401 key_revoked` |
-| `4` | Quota | `402 quota_exceeded`, `402 allowance_exceeded`, `402 payment_required`, `413 file_too_large` |
+| `4` | Quota | `402 quota_exceeded`, `402 allowance_exceeded`, `402 payment_required`, `400` or `413 file_too_large` |
 | `5` | Rate limited or monthly cap | `429 rate_limited` after the retry policy below gave up; `429 monthly_upload_cap` / `429 monthly_download_cap` (never retried — the reset is next month) |
 
 Retry policy: the CLI retries **once** on either of two conditions:
@@ -138,8 +138,9 @@ A stalled transfer is therefore ended by the peer or by the operator, not by a t
 ## Durations
 
 Flags that take a duration accept Go-style strings with an added `d` unit: `30s`, `15m`, `1h`,
-`36h`, `7d`. Plain integers are seconds. The server clamps values to its maxima
-(files and links both cap at 7d on Free and 30d on Paid, and a link never outlives its file) and the CLI prints the effective value it got back.
+`36h`, `7d`. Plain integers are seconds. File lifetimes above the plan maximum are rejected;
+links are clamped to their plan maximum and never outlive their file. Both cap at 7d on Free and
+30d on Paid, and the CLI prints the effective expiry returned by the server.
 
 ## Commands
 
@@ -273,11 +274,10 @@ aispace download 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --output report.pdf --verify
 ```
 
 `--verify` hashes the bytes as they are written and compares the result with the SHA-256 the API
-recorded for the file, so a truncated or altered transfer is caught rather than trusted. It reads
-the file's metadata first, which costs **one extra request** against the per-minute rate limit, and
-only works for files uploaded with `--sha256` — without a recorded digest there is nothing to
-compare against and the command exits 1 with `no_checksum` rather than reporting a check it did
-not perform.
+records for every uploaded file, so a truncated or altered transfer is caught rather than trusted.
+It reads the file's metadata first, which costs **one extra request** against the per-minute rate
+limit. An incomplete or incompatible server response without a digest exits 1 with `no_checksum`
+rather than reporting a check it did not perform.
 
 On a mismatch the exit code is 1 with `checksum_mismatch`, and the output file is removed, so a
 caller that ignores the exit code cannot pick up a corrupt file. With `--output -` the bytes have
@@ -454,24 +454,25 @@ File metadata (`GET /v1/files/:id`).
 aispace quota [--json]
 ```
 
-Four lines, one per group:
+Five lines, one per group:
 
 ```
 key: used 1.0 MB of 50.0 MB, 49.0 MB remaining
 account: used 3.0 MB of 100.0 MB, 97.0 MB remaining, plan free (extra blocks 0)
+month: uploads 12/100, downloads 340/1000, resets 2025-10-01T00:00:00Z
 limits: max file 25.0 MB, max file ttl 30d, max link ttl 7d, uploads 60/h 500/d, requests 300/min
 rate: uploads remaining 58 this hour, 490 today; requests remaining 299 this minute
 ```
 
-The typed response is `key`, `account`, `limits` and `rate` — see
-[`internal/api/types.go`](../internal/api/types.go), which `docs/API.md` names as the client
-contract. The account-wide monthly caps are not part of it: they surface as
-`429 monthly_upload_cap` / `429 monthly_download_cap` errors, which are never retried because the
-reset is the start of the next UTC month.
+The typed response is `key`, `account`, `month`, `limits` and `rate` — see
+[`internal/api/types.go`](../internal/api/types.go). Monthly counters are account-wide and reset at
+`month.period_end`. Exhaustion surfaces as `429 monthly_upload_cap` or
+`429 monthly_download_cap` and is never retried automatically.
 
 ```sh
 aispace quota --json | jq '.key.remaining_bytes'
 aispace quota --json | jq -e '.rate.uploads_hour_remaining > 0' >/dev/null || echo "wait"
+aispace quota --json | jq '.month | {uploads_left: (.uploads_limit - .uploads_used), downloads_left: (.downloads_limit - .downloads_used), period_end}'
 
 # largest file this account may upload right now
 aispace quota --json | jq '[.limits.max_file_bytes, .account.remaining_bytes] | min'

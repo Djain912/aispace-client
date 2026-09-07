@@ -119,8 +119,8 @@ func TestDownloadVerifyRemovesCorruptOutput(t *testing.T) {
 	}
 }
 
-// Without a recorded digest there is nothing to compare against; say so instead
-// of reporting success for a check that never happened.
+// A compatible server records every digest. If one is absent, refuse the
+// incomplete response instead of reporting success for a check that never ran.
 func TestDownloadVerifyRefusesWhenNoDigestRecorded(t *testing.T) {
 	isolate(t)
 	v := newVerifyServer(t, "contents", "")

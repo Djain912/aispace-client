@@ -27,9 +27,8 @@ func (a *app) downloadCmd() *cobra.Command {
 		Long: "Downloads a file this key owns or that is shared with the account, using key\n" +
 			"authentication rather than a public link.\n\n" +
 			"With --verify the bytes are hashed as they are written and compared with the\n" +
-			"SHA-256 the API recorded for the file. That costs one extra metadata request, and\n" +
-			"only works for files uploaded with --sha256, because otherwise there is no\n" +
-			"recorded digest to compare against.",
+			"SHA-256 the API records for every file. That costs one extra metadata request.\n" +
+			"A response without a digest is rejected as incomplete server metadata.",
 		Example: "  aispace download 01J8ZQ3V9N7X2K4M6P8R0T2W4Y --output report.pdf --verify",
 		Args:    exactArgs(1, "<file_id>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -57,7 +56,7 @@ func (a *app) downloadCmd() *cobra.Command {
 				if want = res.Value.SHA256; want == "" {
 					return &codedError{
 						code: "no_checksum",
-						err:  fmt.Errorf("file %s has no recorded SHA-256 to verify against; it was uploaded without --sha256", id),
+						err:  fmt.Errorf("file %s has no recorded SHA-256 to verify against; the server returned incomplete metadata", id),
 						exit: ExitGeneric,
 					}
 				}
@@ -427,6 +426,7 @@ func (a *app) quotaCmd() *cobra.Command {
 			q := res.Value
 			fmt.Fprintf(a.stdout, "key: used %s of %s, %s remaining\n", fmtBytes(q.Key.UsedBytes), fmtBytes(q.Key.BudgetBytes), fmtBytes(q.Key.RemainingBytes))
 			fmt.Fprintf(a.stdout, "account: used %s of %s, %s remaining, plan %s (extra blocks %d)\n", fmtBytes(q.Account.UsedBytes), fmtBytes(q.Account.AllowanceBytes), fmtBytes(q.Account.RemainingBytes), q.Account.Plan, q.Account.ExtraBlocks)
+			fmt.Fprintf(a.stdout, "month: uploads %d/%d, downloads %d/%d, resets %s\n", q.Month.UploadsUsed, q.Month.UploadsLimit, q.Month.DownloadsUsed, q.Month.DownloadsLimit, fmtTime(q.Month.PeriodEnd))
 			fmt.Fprintf(a.stdout, "limits: max file %s, max file ttl %s, max link ttl %s, uploads %d/h %d/d, requests %d/min\n", fmtBytes(q.Limits.MaxFileBytes), fmtSeconds(q.Limits.MaxFileTTLSeconds), fmtSeconds(q.Limits.MaxLinkTTLSeconds), q.Limits.UploadsPerHour, q.Limits.UploadsPerDay, q.Limits.RequestsPerMinute)
 			fmt.Fprintf(a.stdout, "rate: uploads remaining %d this hour, %d today; requests remaining %d this minute\n", q.Rate.UploadsHourRemaining, q.Rate.UploadsDayRemaining, q.Rate.RequestsMinuteRemaining)
 			return nil
