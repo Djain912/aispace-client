@@ -194,6 +194,9 @@ func (a *app) client() (*api.Client, error) {
 			exit: ExitAuth,
 		}
 	}
+	if err := validateKey(cfg.Key); err != nil {
+		return nil, err
+	}
 	if err := validateServerURL(cfg.URL); err != nil {
 		return nil, err
 	}
@@ -221,6 +224,41 @@ func validateServerURL(raw string) error {
 		return nil
 	}
 	return usagef("--url must use HTTPS (HTTP is allowed only for localhost)")
+}
+
+// invalidHeaderByte returns the index of the first byte that cannot appear in
+// an HTTP header value, or -1. It mirrors the check net/http applies when
+// writing a request: control characters are rejected, tab is allowed, and
+// bytes >= 0x80 are passed through.
+func invalidHeaderByte(v string) int {
+	for i := 0; i < len(v); i++ {
+		if b := v[i]; b < 0x20 && b != '	' || b == 0x7f {
+			return i
+		}
+	}
+	return -1
+}
+
+// validateHeaderValue rejects a value that cannot be sent as an HTTP header.
+// The transport would otherwise fail with "invalid header field value", which
+// reads as a network fault and exits 1, telling an agent to retry a request
+// that can never succeed. These are bad inputs, so they exit 2 instead.
+func validateHeaderValue(what, v string) error {
+	i := invalidHeaderByte(v)
+	if i < 0 {
+		return nil
+	}
+	return usagef("%s must not contain control characters: found %q at byte %d", what, v[i:i+1], i)
+}
+
+// validateKey checks the key before it becomes an Authorization header. The
+// message never echoes the key, which is a credential; a trailing newline is
+// the common cause, from a key file read whole or one with CRLF endings.
+func validateKey(key string) error {
+	if invalidHeaderByte(key) >= 0 {
+		return usagef("API key contains a control character (often a trailing newline from reading a key file); strip whitespace from --key, AISPACE_KEY or the config file")
+	}
+	return nil
 }
 
 // classify maps an error to (exit code, error code string).

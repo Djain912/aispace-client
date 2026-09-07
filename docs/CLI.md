@@ -85,7 +85,7 @@ the API's code and message together with the exit code, so a caller can branch o
 |---|---|---|
 | `0` | Success | |
 | `1` | Generic failure | Network error, 5xx, unexpected response, file not found locally |
-| `2` | Usage error | Bad flag, missing argument, unparsable duration |
+| `2` | Usage error | Bad flag, missing argument, unparsable duration, control character in the key, `--name` or `--content-type` |
 | `3` | Authentication | No key configured, `401 invalid_key`, `401 key_revoked` |
 | `4` | Quota | `402 quota_exceeded`, `402 allowance_exceeded`, `402 payment_required`, `413 file_too_large` |
 | `5` | Rate limited or monthly cap | `429 rate_limited` after the retry policy below gave up; `429 monthly_upload_cap` / `429 monthly_download_cap` (never retried — the reset is next month) |
