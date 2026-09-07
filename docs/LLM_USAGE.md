@@ -247,11 +247,11 @@ Rules of thumb:
   Pro block), so do not hand the same link to a system that polls it. One deliberate download per
   recipient is the intent.
 
-## Checking quota and monthly caps before a big upload or batch
+## Checking upload capacity before a big upload or batch
 
-There are two independent ways to be refused: **bytes** (`402`, storage) and **counts**
-(`429 monthly_upload_cap`, the plan's uploads for the calendar month). One `GET` covers both and
-avoids a wasted transfer:
+Uploads can be refused for **bytes** (`402`, storage), short-window rate limits (`429`), or the
+account-wide monthly count (`429 monthly_upload_cap`). A `quota` GET can pre-check storage and the
+short-window limits, but the monthly cap is reported only when an upload reaches it:
 
 ```sh
 need=2097152    # 2 MB
@@ -263,13 +263,14 @@ aispace quota --json | jq -e --argjson n "$need" '
   and .rate.uploads_day_remaining > 0' >/dev/null || { echo "cannot upload $need bytes now"; aispace quota; exit 4; }
 ```
 
-Before a **batch** of N uploads, check the daily upload count and the total bytes in one go:
+Before a **batch** of N uploads, check both short-window upload counts and the total bytes in one go:
 
 ```sh
 n=250; total=52428800   # 250 files, 50 MB together
 aispace quota --json | jq -e --argjson n "$n" --argjson t "$total" '
   .key.remaining_bytes >= $t
   and .account.remaining_bytes >= $t
+  and .rate.uploads_hour_remaining >= $n
   and .rate.uploads_day_remaining >= $n' >/dev/null || {
     echo "batch of $n would exceed a cap; see aispace quota"; exit 4; }
 ```

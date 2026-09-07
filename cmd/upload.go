@@ -95,44 +95,45 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 			return usagef("--link-expires: %v", err)
 		}
 	}
-
 	c, err := a.client()
 	if err != nil {
 		return err
 	}
 
-	src, size, name, cleanup, err := a.openSource(path, f.name)
+	originalName := resolvedUploadName(path, f.name)
+	name := originalName
+	ct := f.contentType
+	if ct == "" {
+		ct = contentTypeFor(name)
+	}
+	if f.encrypt {
+		if !strings.HasSuffix(strings.ToLower(name), ".age") {
+			name += ".age"
+		}
+		ct = encryptedContentType
+	}
+	if err := validateHeaderValue("file name", name); err != nil {
+		return err
+	}
+	if err := validateHeaderValue("--content-type", ct); err != nil {
+		return err
+	}
+
+	src, size, _, cleanup, err := a.openSource(path, f.name)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
-	ct := f.contentType
-	if ct == "" {
-		ct = contentTypeFor(name)
-	}
 	var encrypted *encryptedUpload
 	if f.encrypt {
-		encrypted, err = encryptForUpload(src, name, f.recipient, f.identityOut)
+		encrypted, err = encryptForUpload(src, originalName, f.recipient, f.identityOut)
 		if err != nil {
 			return err
 		}
 		defer encrypted.cleanup()
 		src = encrypted.Reader
 		size = encrypted.Size
-		if !strings.HasSuffix(strings.ToLower(name), ".age") {
-			name += ".age"
-		}
-		ct = encryptedContentType
-	}
-	// Both values are sent as HTTP headers, so reject anything the transport
-	// would refuse. name may come from --name or from the file's basename, which
-	// on POSIX can legitimately contain a newline.
-	if err := validateHeaderValue("file name", name); err != nil {
-		return err
-	}
-	if err := validateHeaderValue("--content-type", ct); err != nil {
-		return err
 	}
 
 	opts := api.UploadOptions{Name: name, Size: size, ExpiresIn: expiresIn, ContentType: ct}
@@ -216,21 +217,31 @@ func (a *app) runUpload(cmd *cobra.Command, path string, f uploadFlags) error {
 // leaving it behind makes the obvious retry of the same command fail with
 // "identity file already exists" — a usage error for arguments that were right.
 //
-// A request that failed without a response is different: the file may have been
-// stored anyway, in which case the identity is the only way to ever read it.
-// Those are kept, and the caller is told why.
+// A transport or server failure is different: the file may have been stored
+// even though no success response reached the client. Those identities are
+// kept, and the caller is told why.
 func (a *app) discardUnusedIdentity(e *encryptedUpload, err error) {
 	if e.IdentityFile == "" {
 		return
 	}
 	var ae *api.Error
-	if errors.As(err, &ae) && ae.Status >= 400 {
+	if errors.As(err, &ae) && ae.Status >= 400 && ae.Status < 500 {
 		// The server rejected the request, so no ciphertext exists.
 		if os.Remove(e.IdentityFile) == nil {
 			return
 		}
 	}
 	fmt.Fprintf(a.stderr, "warning: kept identity file %s; the upload may still have stored the file, so check `aispace ls` before removing it\n", e.IdentityFile)
+}
+
+func resolvedUploadName(path, nameFlag string) string {
+	if nameFlag != "" {
+		return nameFlag
+	}
+	if path == "-" {
+		return "stdin"
+	}
+	return filepath.Base(path)
 }
 
 // openSource returns a seekable reader for path (or stdin buffered to a temp
@@ -252,10 +263,7 @@ func (a *app) openSource(path, nameFlag string) (io.ReadSeeker, int64, string, f
 			cleanup()
 			return nil, 0, "", noop, &codedError{code: "io", err: err, exit: ExitGeneric}
 		}
-		name := nameFlag
-		if name == "" {
-			name = "stdin"
-		}
+		name := resolvedUploadName(path, nameFlag)
 		return tmp, n, name, cleanup, nil
 	}
 	fh, err := os.Open(path)
@@ -277,16 +285,10 @@ func (a *app) openSource(path, nameFlag string) (io.ReadSeeker, int64, string, f
 		saved := a.stdin
 		a.stdin = fh
 		defer func() { a.stdin = saved }()
-		name := nameFlag
-		if name == "" {
-			name = filepath.Base(path)
-		}
+		name := resolvedUploadName(path, nameFlag)
 		return a.openSource("-", name)
 	}
-	name := nameFlag
-	if name == "" {
-		name = filepath.Base(path)
-	}
+	name := resolvedUploadName(path, nameFlag)
 	return fh, st.Size(), name, func() { fh.Close() }, nil
 }
 

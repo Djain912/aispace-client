@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"filippo.io/age"
@@ -1164,6 +1165,27 @@ func TestControlCharactersInHeaderValuesAreUsageErrors(t *testing.T) {
 				t.Fatalf("bad input reported as a network fault: %q", r.stderr)
 			}
 		})
+	}
+	if f.count() != 0 {
+		t.Fatalf("no request should have been sent, got %d", f.count())
+	}
+}
+
+func TestHeaderValidationPrecedesReadingStdin(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+
+	cases := [][]string{
+		{"upload", "-", "--name", "a\nb.txt"},
+		{"upload", "-", "--content-type", "text/x\ny"},
+	}
+	for _, args := range cases {
+		var stdout, stderr bytes.Buffer
+		code := Run(args, iotest.ErrReader(errors.New("stdin must not be read")), &stdout, &stderr, "1.2.3")
+		if code != ExitUsage {
+			t.Errorf("%q: exit = %d, want %d; stderr = %q", args, code, ExitUsage, stderr.String())
+		}
 	}
 	if f.count() != 0 {
 		t.Fatalf("no request should have been sent, got %d", f.count())
