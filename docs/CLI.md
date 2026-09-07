@@ -214,8 +214,9 @@ encryption block) is still printed before the error, so the stored file is not l
 If the server *rejects* the upload (quota, size, rate limit, bad key), a file written by
 `--identity-out` is removed again: nothing was stored, so that identity decrypts nothing, and
 leaving it behind would make retrying the same command fail with `identity file already exists`.
-When the request fails without a response the outcome is unknown, so the identity is kept and a
-warning names it — check `aispace ls` before deleting it, because the file may have been stored.
+When the request fails without a response or returns a 5xx server error, the outcome is uncertain,
+so the identity is kept and a warning names it — check `aispace ls` before deleting it, because the
+file may have been stored.
 
 ### `aispace download`
 

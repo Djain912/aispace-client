@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,29 @@ import (
 
 	"github.com/aispace-sh/aispace-client/internal/config"
 )
+
+func TestInvalidEncryptedUploadLeavesNoIdentity(t *testing.T) {
+	isolate(t)
+	f := newFakeServer(t)
+	writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+	dir := t.TempDir()
+	src := filepath.Join(dir, "secret.pdf")
+	if err := os.WriteFile(src, []byte("confidential"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	identity := filepath.Join(dir, "secret.agekey")
+
+	r := run("", "upload", src, "--name", "bad\nname.pdf", "--encrypt", "--identity-out", identity)
+	if r.code != ExitUsage {
+		t.Fatalf("exit = %d, want %d: %+v", r.code, ExitUsage, r)
+	}
+	if _, err := os.Stat(identity); !os.IsNotExist(err) {
+		t.Fatalf("identity created before header validation: err=%v", err)
+	}
+	if f.count() != 0 {
+		t.Fatalf("no request should have been sent, got %d", f.count())
+	}
+}
 
 // A rejected upload used to leave the generated identity file on disk. Nothing
 // was stored, so it decrypted nothing, and it made the obvious retry of the
@@ -74,6 +98,39 @@ func TestUploadKeepsIdentityWhenOutcomeIsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(r.stderr, "kept identity file") {
 		t.Fatalf("stderr should explain why the file was kept: %q", r.stderr)
+	}
+}
+
+func TestUploadKeepsIdentityAfterServerFailure(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout} {
+		t.Run(fmt.Sprintf("HTTP %d", status), func(t *testing.T) {
+			isolate(t)
+			f := newFakeServer(t)
+			writeConfig(t, config.File{Key: f.key, URL: f.srv.URL})
+			dir := t.TempDir()
+			src := filepath.Join(dir, "secret.pdf")
+			if err := os.WriteFile(src, []byte("confidential"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			identity := filepath.Join(dir, "secret.agekey")
+
+			f.fail = func(r *http.Request) (int, string) {
+				if r.Method == http.MethodPost {
+					return status, `{"error":{"code":"internal","message":"server failed"}}`
+				}
+				return 0, ""
+			}
+			r := run("", "upload", src, "--encrypt", "--identity-out", identity)
+			if r.code != ExitGeneric {
+				t.Fatalf("exit = %d, want %d: %+v", r.code, ExitGeneric, r)
+			}
+			if _, err := os.Stat(identity); err != nil {
+				t.Fatalf("identity removed after uncertain server failure: %v", err)
+			}
+			if !strings.Contains(r.stderr, "kept identity file") {
+				t.Fatalf("stderr should explain why the file was kept: %q", r.stderr)
+			}
+		})
 	}
 }
 
