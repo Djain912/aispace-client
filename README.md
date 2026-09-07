@@ -9,6 +9,8 @@ The hosted service is operated separately; this repository contains no server, b
 or customer data. The client is built for humans and LLM agents: one binary, stable exit codes,
 machine-readable JSON, and optional local age encryption.
 
+> 🤖 **Using Grok?** [Add the aispace bot to Grok Bot →](https://x.ai/bot/suv5xSPPbQmzi02LF7Z9Z)
+
 ## Install
 
 ```sh
@@ -49,7 +51,7 @@ aispace completion bash|zsh|fish
 
 `upload` flags: `--name`, `--expires`, `--content-type` (default guessed from extension), `--sha256`
 (sends `X-SHA256` for server-side verification), `--link`, `--link-expires`, `--max-downloads`,
-`--encrypt`, `--recipient`, and `--identity-out`.
+`--private`, `--shared`, `--encrypt`, `--recipient`, and `--identity-out`.
 Uploads stream from disk; stdin (`-`) is buffered to a temp file so `Content-Length` is known.
 Encrypted uploads use age X25519 locally, spool ciphertext to a mode-0600 temp file, hash it, and
 store it as `<name>.age`; the secret identity is never sent to the API.
@@ -77,6 +79,25 @@ mode 0600. A warning is printed if the file is readable by others. `AISPACE_CONF
 
 Durations (`--expires`, `--link-expires`) accept Go syntax plus a `d` suffix: `30m`, `24h`, `7d`, `1d12h`,
 or a bare number of seconds. Omitting them uses the server defaults (7 days for files, 1 hour for links).
+
+## File permissions and links
+
+File visibility controls authenticated key access. A public link is a separate capability: creating
+one requires a Pro account and makes that one file available to anyone holding the URL.
+
+| File mode | Who can access it? | File lifetime | Public-link lifetime | Download cap | Exposure if access leaks |
+|---|---|---|---|---|---|
+| `private` | Uploading key only | 7 days by default; maximum 7 days on Free or 30 days on Pro | None | Account monthly limit | Private files belonging to that key, until deletion or expiry |
+| `account` | Every active key on the account | 7 days by default; maximum 7 days on Free or 30 days on Pro | None | Account monthly limit | Account-shared files, until deletion or expiry |
+| `private` + public link | Uploading key and anyone with the URL | Maximum 30 days because links require Pro | 1 hour by default; maximum 30 days and never beyond file expiry | Optional per-link cap | Only the linked file, until link expiry, revocation, exhaustion, file deletion, or file expiry |
+| `account` + public link | Account keys and anyone with the URL | Maximum 30 days because links require Pro | 1 hour by default; maximum 30 days and never beyond file expiry | Optional per-link cap | URL access ends with the link; account keys retain access until file deletion or expiry |
+| Client-encrypted file | Visibility controls ciphertext access; only age identity holders can decrypt it | Same limits as the selected file mode | Same Pro-only limits when a link is created | Optional per-link cap | Plaintext exposure requires both the ciphertext and the age identity |
+
+Available duration syntax includes `30s`, `15m`, `1h`, `36h`, and `7d`.
+
+A file becomes unavailable when its file lifetime ends. A link can end sooner because it expired,
+was revoked, or reached its download cap. Deleting the file immediately ends authenticated key
+access and every associated public link.
 
 ## Exit codes
 
