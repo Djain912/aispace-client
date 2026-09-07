@@ -111,6 +111,10 @@ and the durable destination has been verified.
 
 - List this key's files and account-shared files: `aispace ls --json`
 - Download an accessible file without a public link: `aispace download FILE_ID --output PATH`
+- Add `--verify` when the artifact will be acted on rather than just inspected. It checks the
+  bytes against the SHA-256 recorded at upload and deletes the output on a mismatch, so a
+  truncated transfer cannot be mistaken for a complete one. It needs the file to have been
+  uploaded with `--sha256`, and costs one extra request.
 - Inspect one file, including `enc_alg`: `aispace info FILE_ID --json`
 
 Only the key that uploaded a file may manage it or its public links. Account-shared sibling keys
