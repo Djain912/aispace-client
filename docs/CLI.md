@@ -58,6 +58,7 @@ environments (CI, agent sandboxes) can skip `login` entirely and export `AISPACE
 | `AISPACE_KEY` | Bot key; overrides the config file |
 | `AISPACE_URL` | Base URL; overrides the config file (self-hosted or `http://localhost:8787`) |
 | `AISPACE_AGE_IDENTITY` | Secret age X25519 identity used by `decrypt` when `--identity-file` is omitted |
+| `AISPACE_TRANSFER_TOKEN` | Sealed recipient link or canonical token used by `transfer receive` |
 | `AISPACE_CONFIG` | Full path to the config file, overriding the `XDG_CONFIG_HOME`/`HOME` lookup |
 | `AISPACE_INSTALL_DIR` | Installer only: destination directory |
 
@@ -156,6 +157,94 @@ links are clamped to their plan maximum and never outlive their file. Both cap a
 30d on Paid, and the CLI prints the effective expiry returned by the server.
 
 ## Commands
+
+### `aispace transfer create`
+
+```sh
+aispace transfer create <path> [path...] --sealed --link \
+  [--expires 1d] [--max-downloads 1]
+```
+
+Transport selection is explicit and preserves the same sealed ciphertext format:
+
+```sh
+aispace transfer create report.pdf --sealed --link \
+  --transport adaptive --durability durable-first --transport-privacy relay-only
+```
+
+`stored` remains the default. In the current experimental release, the Go client records adaptive
+intent but has no reviewed WebRTC/TURN byte driver, so it immediately continues over durable R2 and
+prints the fallback reason. It sends adaptive-only create fields only after successful compatible
+capability discovery; older, malformed, or temporarily unavailable discovery endpoints fall back
+to the strict stored request. `direct-first` and `live-only` are rejected rather than silently
+changing durability. Choose `--transport-privacy direct` only when accepting that a future direct
+path may expose network addresses to the peer and signaling infrastructure; `relay-only` is the
+safer default.
+
+Creates one asynchronous, end-to-end encrypted transfer. Every input must be a regular file;
+filenames, content types, per-file sizes, and plaintext hashes exist only in the encrypted
+manifest. The service sees aggregate quota and multipart values. Content uses independently
+authenticated 8 MiB AES-256-GCM chunks, so an interrupted upload or download can restart at a
+known ciphertext boundary without trusting partial plaintext. Upload resume survives a later CLI
+invocation; download range retry currently covers transient failures within the active invocation.
+
+V1 accepts at most 1,000 files, 10,000 ciphertext parts, and a 1 MiB encrypted manifest.
+
+The command prints both an HTTPS recipient link and a canonical CLI token. The link has the form
+`https://aispace.sh/t/<id>#as1.<master-key>.<claim-capability>`. Everything after `#` is a bearer
+secret: the browser does not send it in HTTP, and the CLI sends only the claim capability in an
+Authorization header. The master key never leaves the sender or recipient.
+
+Human output continues to print the recipient link. JSON output omits both bearer `link` and
+`token` by default; automation must opt in with `--include-secret` and redirect stdout to a
+protected file. The CLI refuses `--include-secret` when stdout is a terminal.
+
+A mode-`0600` owner ticket is saved under the aispace config directory. It contains the upload and
+revoke capabilities and the recipient token. Treat it like a password; `transfer revoke` reads it
+without placing a capability in process arguments.
+
+If the process stops before finalization, rerun `aispace transfer resume <transfer-id>`. The CLI
+re-hashes the original source paths recorded in the ticket, reads owner status, keeps only uploaded
+parts whose size and SHA-256 still match, and uploads the remainder before replacing the encrypted
+manifest and idempotently completing the transfer.
+
+### `aispace transfer receive`
+
+```sh
+aispace transfer receive [--token-file PATH] [--output DIR] [--yes] [--overwrite]
+```
+
+With no source flag, the command prompts for a complete link or canonical token. It also accepts
+`AISPACE_TRANSFER_TOKEN`; `--token-file` requires mode `0600`. Supplying the secret as an argument
+is supported for convenience but is not recommended on shared machines because process arguments
+may be visible to other users.
+
+The encrypted manifest is authenticated and displayed before the server-side claim is created.
+The sender is shown as `Unknown sender` unless a future signed identity is present—encryption does
+not prove who sent a transfer. After confirmation, ciphertext is streamed into mode-`0600`
+`.partial` files, retried with HTTP ranges at authenticated chunk boundaries, and checked against
+both chunk tags and whole-file SHA-256 hashes. Existing paths are rejected unless `--overwrite` is
+explicit. Final names appear only after every file verifies; only then does the CLI submit the
+verified commit that consumes a limited download.
+
+```sh
+# Safest interactive path: the secret is never a process argument.
+aispace transfer receive
+
+# Automation: secret is read from a protected file and prompting is disabled.
+aispace transfer receive --token-file ./handoff.token --output ./received --yes
+```
+
+### `aispace transfer resume`, `status`, and `revoke`
+
+```sh
+aispace transfer resume <transfer-id> [--ticket PATH]
+aispace transfer status <transfer-id> [--json]
+aispace transfer revoke <transfer-id> [--ticket PATH]
+```
+
+`resume` and `status` use the bot key to inspect uploaded parts. `revoke` reads the
+transfer-scoped revoke capability from the saved owner ticket. Revocation is idempotent.
 
 ### `aispace login`
 
@@ -553,6 +642,118 @@ an unstamped local build. `--json` prints the version and the exact `User-Agent`
 ```
 
 ## Recipes
+
+## Human and device handoff
+
+Every sealed bearer transfer has equivalent HTTPS, CLI-token, and native-link encodings. The
+canonical CLI token embeds the HTTPS service origin and includes a transcription checksum:
+
+```sh
+# Preferred: protected prompt, mode-0600 file, or environment variable.
+aispace handoff encode
+aispace handoff encode --token-file ./handoff.token
+AISPACE_TRANSFER_TOKEN='aispace-transfer-v1....' aispace handoff encode
+
+# Convenience only; process arguments can be visible to other local users.
+aispace handoff encode 'https://aispace.sh/t/01...#as1....'
+```
+
+The command prints secrets, so it is intentionally unavailable with `--json`. The native URI is a
+local wrapper; opening it still requires its embedded HTTPS origin to match the configured
+`AISPACE_URL` or `--url` value.
+
+For a nearby browser or second CLI, create a five-minute, one-use pairing code from the mode-`0600`
+owner ticket and keep the sender running:
+
+```sh
+aispace handoff offer 01...
+# code    J7KM-PQRT
+# open    https://aispace.sh/pair/J7KM-PQRT
+
+aispace handoff receive J7KM-PQRT --output ./incoming
+```
+
+The receiver sees the exact service origin, transfer mode, sender status, size, file count and
+expiry before approval. The short code never derives or returns the transfer key. After approval,
+the sender encrypts the canonical intent to a one-use P-256 receiver key; the service relays only
+that ciphertext. A second distinct receiver invalidates the room and both users must start again.
+
+`handoff receive` applies the normal sealed-transfer preflight, authentication, partial-file and
+verified-commit behavior. `--yes` skips only the handoff approval prompt; it does not weaken origin,
+envelope, manifest, chunk, or file verification. Pairing and secret-bearing encoding are disabled
+in JSON mode.
+
+Built-in QR rendering and native OS scheme registration are not part of this experimental CLI
+release; the printed HTTPS pairing URL is the no-install fallback.
+
+## Agent identity and inbox commands
+
+```text
+aispace identity create --name NAME --handle SLUG
+aispace identity list
+aispace identity show ID
+aispace identity disable ID
+aispace identity rotate ID --purpose encryption|signing
+aispace identity revoke ID KEY_ID
+
+aispace recipient add INVITATION [--alias SLUG]
+aispace recipient verify ALIAS --fingerprint FINGERPRINT
+aispace recipient list
+aispace recipient remove ALIAS
+
+aispace transfer create PATH --to ALIAS [--from ID] [--also-link]
+aispace inbox list [--cursor CURSOR] [--limit 100]
+aispace inbox receive DELIVERY_ID [--identity ID] [--output DIR] [--yes]
+                        [--allow-unknown-sender]
+aispace inbox reject DELIVERY_ID [--identity ID]
+aispace inbox processed DELIVERY_ID [--identity ID]
+```
+
+`recipient remove` deletes the caller-owned server pin before deleting its
+local trust entry. An already-absent server pin is treated as a successful
+idempotent removal; a service error leaves the local entry intact for retry.
+
+An unverified recipient is rejected unless the send supplies the complete
+`--recipient-fingerprint` or explicitly opts into `--trust-on-first-use`.
+Every send resolves the public record again and blocks a changed fingerprint.
+Recognized rotations may advance both key purposes and span up to 32 historical
+successors; every predecessor record, public-key byte string and signature must
+form a complete chain back to the local pin. Any gap requires explicit repinning.
+Addressed sends do not print a bearer decryption link unless `--also-link` is
+present.
+
+Invitation origins are pinned with recipient records, and local identities are
+bound to the server where they were created. Identity, recipient, sender and
+inbox key operations fail rather than reuse those records with another
+configured origin. Legacy trust records without an origin must be re-imported.
+
+Identity creation generates X25519 recipient and Ed25519 signing keys locally.
+Private records live in `identities/` beside the CLI config and are atomically
+written mode `0600`; only public keys and proof-of-possession signatures are
+uploaded. Rotation retains old encryption private keys so already-addressed
+deliveries remain readable. There is no server-side recovery.
+Challenge, identity-publication, rotation and inbox-claim replay state is saved
+locally with mode `0600` before the request. Re-running the same command recovers
+the original server response and promotes the already-generated private key
+instead of generating an incompatible replacement.
+
+`inbox receive` unwraps the content key with RFC 9180 HPKE, checks manifest
+recipient and sender bindings, verifies every authenticated chunk and file
+hash, installs files only after verification, then submits a recipient-signed
+`verified` receipt. A valid signature from a key that is not locally pinned is
+reported as `Signature valid; sender unknown`, never as a verified sender.
+Historical sender verification uses the authenticated claim-time key snapshot,
+not a live public lookup. Revoked or expired signing keys and disabled sender
+identities are shown explicitly and are never labeled verified.
+`--yes` refuses such a sender (including an unsigned delivery) unless
+`--allow-unknown-sender` is also supplied; interactive receive can still show
+the manifest and ask the operator explicitly.
+
+Exact signed downloaded, verified, processed and rejected receipt requests are
+persisted before submission. A restart replays the same receipt ID, signature,
+claim nonce and idempotency key until the service acknowledges it, then advances
+or removes the local sequence state.
+
 
 Upload a directory as a tarball with a single-download link:
 
