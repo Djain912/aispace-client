@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -108,7 +109,7 @@ func TestFingerprintAndInvitationStrict(t *testing.T) {
 }
 
 func TestStoreRequiresPrivatePermissions(t *testing.T) {
-	if os.Getenv("GOOS") == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	dir := t.TempDir()
@@ -134,7 +135,7 @@ func TestStoreRequiresPrivatePermissions(t *testing.T) {
 }
 
 func TestPendingReplayStateRequiresPrivatePermissions(t *testing.T) {
-	if os.Getenv("GOOS") == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	store := NewStore(filepath.Join(t.TempDir(), "config.json"))

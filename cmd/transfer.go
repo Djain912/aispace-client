@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -591,7 +592,7 @@ func (a *app) readTransferReference(args []string, tokenFile string) (string, er
 		if err != nil {
 			return "", err
 		}
-		if st.Mode().Perm()&0o077 != 0 {
+		if runtime.GOOS != "windows" && st.Mode().Perm()&0o077 != 0 {
 			return "", usagef("token file %s permissions are %04o; expected 0600", tokenFile, st.Mode().Perm())
 		}
 		b, err := os.ReadFile(tokenFile)
@@ -936,7 +937,7 @@ func readTransferTicket(path string) (transferTicket, error) {
 	if err != nil {
 		return ticket, err
 	}
-	if st.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && st.Mode().Perm()&0o077 != 0 {
 		return ticket, usagef("ticket file %s permissions are %04o; expected 0600", path, st.Mode().Perm())
 	}
 	b, err := os.ReadFile(path)
