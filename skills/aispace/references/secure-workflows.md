@@ -228,16 +228,16 @@ identity records, recipient invitations, and pairing summaries are origin-bound;
 must fail before an authenticated request. Never rewrite an embedded origin or forward credentials
 to make a foreign reference work.
 
-The optional server groups default off and depend on the sealed base:
+The secure workflow components depend on the sealed base:
 
-| Capability | Required flags/components |
+| Capability | Required components |
 |---|---|
-| Sealed bearer transfer | `SEALED_TRANSFERS_ENABLED=1` plus transfer storage/migrations |
-| Agent identity and inbox | sealed plus `AGENT_IDENTITIES_ENABLED=1` |
-| Pairing handoff | sealed plus `HANDOFF_ENABLED=1` and the pairing Durable Object |
-| Adaptive intent | sealed plus `ADAPTIVE_TRANSPORT_ENABLED=1` |
+| Sealed bearer transfer | Transfer storage and migrations |
+| Agent identity and inbox | Sealed transfer storage plus identity migrations |
+| Pairing handoff | Sealed transfer storage plus the pairing Durable Object |
+| Adaptive intent | Sealed transfer storage plus adaptive migrations |
 
 `ADAPTIVE_DIRECT_ENABLED` and `ADAPTIVE_TURN_ENABLED` are additional kill switches, not evidence
-that a live driver exists. Core stored R2 delivery requires neither signaling nor TURN. If an
-experimental route is hidden or unavailable, report the optional feature as disabled/unsupported
-and keep ordinary uploads or explicitly requested stored delivery available.
+that a live driver exists. Core stored R2 delivery requires neither signaling nor TURN. Older or
+incomplete deployments may still lack a route; report it as unsupported and keep ordinary uploads
+or explicitly requested stored delivery available.

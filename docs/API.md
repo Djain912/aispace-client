@@ -6,10 +6,9 @@ The CLI uses the public bot API at `https://aispace.sh`. Compatible endpoints ca
 For end-to-end workflows and security decisions, start with
 [Secure handoffs](SECURE_HANDOFFS.md). This page is the wire-level endpoint reference.
 
-Experimental endpoint groups can be disabled independently by the service operator. Agent
-identity requires sealed transfers; human/device handoff and adaptive intent also require sealed
-transfers. The adaptive endpoints currently expose discovery and fail-closed control-plane
-behavior only: no WebRTC, TURN, native live relay, or other live byte path is available.
+Agent identity, human/device handoff, and adaptive durable-first intent build on sealed transfers.
+The adaptive endpoints currently expose discovery and fail-closed control-plane behavior only: no
+WebRTC, TURN, native live relay, or other live byte path is available.
 
 ## Authentication
 

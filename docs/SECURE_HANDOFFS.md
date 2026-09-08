@@ -16,10 +16,8 @@ For every flag, see [CLI.md](CLI.md). For HTTP request and response shapes, see 
 | Move an existing transfer to a nearby device | `handoff offer` | A five-minute pairing code |
 | Record a preference for future live transport | `--transport adaptive` | The same durable R2 transfer today |
 
-These workflows are experimental and can be disabled by the service operator. Sealed transfers
-are the base feature. Agent identities, pairing, and adaptive intent each require an additional
-server-side feature gate. A disabled optional feature does not make ordinary uploads or R2 storage
-unavailable.
+These workflows are experimental. Sealed transfers are their common foundation; ordinary uploads
+and R2 storage remain available alongside identities, pairing, and adaptive intent.
 
 ## Send an anonymous sealed bundle
 
@@ -308,10 +306,9 @@ origin-bound. The client rejects using those records against a different configu
 identity invitation must use HTTPS, contain no credentials or query, and match the configured
 origin exactly.
 
-A self-hosted operator must deploy the sealed-transfer migrations and bindings, then explicitly
-enable each experimental feature. Identity requires sealed delivery. Handoff and adaptive intent
-also require sealed delivery. Pairing additionally requires the pairing Durable Object. Core R2
-delivery works without any future signaling or TURN component.
+A self-hosted operator must deploy all sealed-transfer migrations and bindings. Identity, handoff,
+and adaptive intent build on sealed delivery, and pairing additionally requires the pairing
+Durable Object. Core R2 delivery works without any future signaling or TURN component.
 
 ## Current limits and deferred work
 

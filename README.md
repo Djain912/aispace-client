@@ -37,9 +37,8 @@ binary, stable exit codes, streaming uploads, and share URLs printed on a predic
   content locally; their master key never reaches aispace. The existing age X25519 flow remains
   available for recipient-key workflows.
 
-Sealed transfers, agent identities, device pairing, and adaptive intent are experimental
-feature-gated surfaces. A service operator may leave any of them unavailable; ordinary uploads
-and durable R2 storage continue to work.
+Sealed transfers, agent identities, device pairing, and adaptive durable-first intent are
+experimental surfaces. Ordinary uploads and durable R2 storage continue to work alongside them.
 
 The hosted service is operated separately. This repository contains the client, agent skill, and
 integration examples—not the server, billing system, deployment configuration, or customer data.

@@ -48,8 +48,7 @@ control sender trust. A valid signature from an unpinned key is not a trusted se
 
 Five-minute pairing codes are rendezvous locators, not decryption keys. Current pairing binds one
 approved one-use receiver key; QR generation and PAKE are not implemented. Adaptive mode has no
-WebRTC/TURN/native byte driver and continues over durable R2. These surfaces are feature-gated and
-may be unavailable on a deployment.
+WebRTC/TURN/native byte driver and continues over durable R2.
 
 ## Reporting vulnerabilities
 
