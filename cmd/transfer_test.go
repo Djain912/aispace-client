@@ -45,6 +45,9 @@ func TestTransferJSONSecretRefusesTerminalOutput(t *testing.T) {
 }
 
 func TestTransferTokenFileMustBePrivate(t *testing.T) {
+	if !permBits {
+		t.Skip("platform does not expose Unix permission bits")
+	}
 	isolate(t)
 	path := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(path, []byte("secret\n"), 0o644); err != nil {
