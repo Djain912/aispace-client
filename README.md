@@ -29,13 +29,17 @@
 structured, or temporary for chat. The open-source client is deliberately easy to automate: one
 binary, stable exit codes, streaming uploads, and share URLs printed on a predictable final line.
 
-- **Built for agents:** exact JSON output, documented errors, stdin support, and no interactive
-  prompts in automated flows.
+- **Built for agents:** stable JSON on supported commands, documented errors, stdin support, and
+  explicit noninteractive flags for automation. Secret-bearing handoff commands remain interactive.
 - **Short-lived by design:** file expiration, separately expiring links, revocation, and optional
   per-link download caps.
 - **Private when needed:** sealed asynchronous transfers encrypt filenames, file metadata, and
   content locally; their master key never reaches aispace. The existing age X25519 flow remains
   available for recipient-key workflows.
+
+Sealed transfers, agent identities, device pairing, and adaptive intent are experimental
+feature-gated surfaces. A service operator may leave any of them unavailable; ordinary uploads
+and durable R2 storage continue to work.
 
 The hosted service is operated separately. This repository contains the client, agent skill, and
 integration examples—not the server, billing system, deployment configuration, or customer data.
@@ -130,14 +134,14 @@ aispace upload notes.md --shared --json
 aispace transfer create report.pdf charts.png --sealed --link --expires 1d --max-downloads 1
 
 # Move that sealed transfer to a nearby browser/device with an expiring code.
-aispace handoff offer 01TRANSFERID
+aispace handoff offer "$TRANSFER_ID"
 # On the receiving CLI: aispace handoff receive J7KM-PQRT
 
 # Pin an agent and deliver without exposing a bearer decryption link.
-aispace recipient add 'https://aispace.sh/i/01RECIPIENT#fp.A1B2...'
-aispace recipient verify research-agent --fingerprint 'A1B2 C3D4 ...'
-aispace transfer create report.pdf --to research-agent --from my-agent --expires 7d
-aispace inbox receive 01DELIVERY --yes
+aispace recipient add "$RECIPIENT_INVITATION"
+aispace recipient verify research-agent --fingerprint "$RECIPIENT_FINGERPRINT"
+aispace transfer create report.pdf --sealed --to research-agent --from my-agent --expires 7d
+aispace inbox receive "$DELIVERY_ID" --yes
 
 # Paste the link interactively, inspect its private manifest, then decrypt and verify.
 aispace transfer receive
@@ -151,8 +155,9 @@ aispace revoke <link_id>
 aispace rm <file_id>
 ```
 
-The complete command reference is in [`docs/CLI.md`](docs/CLI.md); the HTTP contract is in
-[`docs/API.md`](docs/API.md).
+Follow [`docs/SECURE_HANDOFFS.md`](docs/SECURE_HANDOFFS.md) for sealed bundles, trusted agent
+inboxes, device pairing, adaptive R2 fallback, and recovery. The complete command reference is in
+[`docs/CLI.md`](docs/CLI.md); the HTTP contract is in [`docs/API.md`](docs/API.md).
 
 `upload` accepts `--name`, `--expires`, `--content-type`, `--sha256`, `--link`, `--link-expires`,
 `--max-downloads`, `--private`, `--shared`, `--encrypt`, `--recipient`, and `--identity-out`.
@@ -187,7 +192,8 @@ Config file: `$XDG_CONFIG_HOME/aispace/config.json` (default `~/.config/aispace/
 mode 0600. A warning is printed if the file is readable by others. `AISPACE_CONFIG` overrides the path.
 
 Durations (`--expires`, `--link-expires`) accept Go syntax plus a `d` suffix: `30m`, `24h`, `7d`, `1d12h`,
-or a bare number of seconds. Omitting them uses the server defaults (7 days for files, 1 hour for links).
+or a bare number of seconds. Omitting them uses the server defaults (7 days for files, 1 hour for
+Pro public links).
 
 ## File permissions and links
 

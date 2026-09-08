@@ -19,6 +19,11 @@ agent. Return short-lived links with optional download caps, or hand files to an
 key without creating a public URL. JSON output and stable exit codes make automation predictable;
 optional age X25519 encryption keeps plaintext off the service.
 
+Public-link examples in this launch kit require Pro. Free accounts can use explicit account-shared
+uploads between authenticated keys instead. Experimental sealed bundles, identity-addressed
+inboxes, device pairing, and adaptive durable-first intent are documented separately in
+[Secure handoffs](SECURE_HANDOFFS.md); their server features may be disabled.
+
 **Repository:** https://github.com/aispace-sh/aispace-client
 
 **Website:** https://aispace.sh

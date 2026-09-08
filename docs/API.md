@@ -3,6 +3,14 @@
 The CLI uses the public bot API at `https://aispace.sh`. Compatible endpoints can be selected with
 `AISPACE_URL` or `--url`.
 
+For end-to-end workflows and security decisions, start with
+[Secure handoffs](SECURE_HANDOFFS.md). This page is the wire-level endpoint reference.
+
+Experimental endpoint groups can be disabled independently by the service operator. Agent
+identity requires sealed transfers; human/device handoff and adaptive intent also require sealed
+transfers. The adaptive endpoints currently expose discovery and fail-closed control-plane
+behavior only: no WebRTC, TURN, native live relay, or other live byte path is available.
+
 ## Authentication
 
 Send a bot key as a bearer token:
@@ -38,6 +46,8 @@ Never put a bot key in a URL. JSON errors use the shape
 | `GET` | `/v1/transports` | Discover transport, privacy, durability, and kill-switch capabilities |
 | `POST` | `/v1/transfers/:id/live-sessions` | Create a short-lived adaptive negotiation intent |
 | `POST` | `/v1/transfers/:id/live-sessions/:session_id/close` | Record a bounded selected path or R2 fallback outcome |
+| `POST` | `/v1/transfers/:id/pairing-codes` | Create a five-minute pairing room for an owned anonymous sealed transfer |
+| `DELETE` | `/v1/transfers/:transfer_id/pairing-codes/:pairing_id` | Revoke an owned pairing room |
 | `GET` | `/t/:id/manifest` | Inspect encrypted metadata with a claim capability |
 | `POST` | `/t/:id/claims` | Create an exclusive, short-lived claim lease |
 | `GET` | `/t/:id/content` | Stream ciphertext, including byte ranges, with a claim token |
@@ -62,6 +72,11 @@ Never put a bot key in a URL. JSON errors use the shape
 | `POST` | `/v1/inbox/:id/receipts` | Submit an idempotent signed receipt |
 | `POST` | `/v1/inbox/:id/reject` | Submit a signed rejection receipt |
 | `GET` | `/v1/deliveries/:id/receipts` | List sender-visible receipt history |
+| `POST` | `/pair/:code/attempts` | Enter a pairing code with a one-use receiver key and nonce |
+| `POST` | `/pair/attempts/:attempt_id/approve` | Approve the visible intent with the attempt capability |
+| `GET` | `/pair/devices/:device_id` | Poll the room with the device capability |
+| `POST` | `/pair/devices/:device_id/bind` | Bind one encrypted intent envelope to the approved receiver |
+| `GET` | `/pair/attempts/:attempt_id` | Poll for the encrypted envelope with the attempt capability |
 
 ## Sealed asynchronous transfers
 
@@ -94,8 +109,8 @@ clients preflight those same limits before upload.
 negotiation cannot delay, replace, or weaken durable completion. `direct-first` and `live-only` are
 not accepted in the current release.
 
-The client generates a 32-byte signaling capability and sends it only in the authenticated live
-session create body; the service persists its SHA-256 verifier. Session bodies accept only bounded
+The live-session schema accepts a 32-byte signaling capability only in the authenticated create
+body; the service persists its SHA-256 verifier. Session bodies accept only bounded
 capability identifiers and never ICE candidates or signaling payloads. Closing a session requires
 the owning bot key and `X-Upload-Capability`. Privacy mode is fixed at creation, so `relay_only`
 cannot later report a direct selection. Operational outcome counters are aggregated by UTC day,
@@ -104,7 +119,7 @@ candidate, IP or filename fields.
 
 The control-plane endpoints do not themselves provide WebRTC signaling or a byte path. Direct and
 TURN kill switches remain disabled until those reviewed components exist. The current Go client
-therefore records adaptive intent and immediately uses R2.
+does not create live sessions; it records adaptive intent and immediately uses R2.
 
 ## Agent identity cryptography
 

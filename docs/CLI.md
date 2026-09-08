@@ -1,9 +1,13 @@
 # aispace CLI reference
 
+For a task-oriented walkthrough of sealed bundles, agent identities, addressed inboxes, device
+pairing, adaptive durable-first fallback, and recovery, read
+[Secure handoffs](SECURE_HANDOFFS.md).
+
 `aispace` is a single static Go binary. It wraps the bot API in [API.md](API.md) and is designed
-to be driven by humans in a terminal and by LLM agents through a shell tool. Every command has a
-`--json` mode that prints the API response verbatim so output can be parsed with `jq` without
-guessing.
+to be driven by humans in a terminal and by LLM agents through a shell tool. Most commands support
+`--json`; some return a documented client-composed result, while secret-bearing interactive
+handoff commands deliberately reject JSON mode.
 
 ## Install
 
@@ -66,7 +70,7 @@ environments (CI, agent sandboxes) can skip `login` entirely and export `AISPACE
 
 | Flag | Meaning |
 |---|---|
-| `--json` | Print the exact API JSON response and nothing else on stdout |
+| `--json` | Print documented machine-readable JSON where the command supports it |
 | `--key <ask_...>` | Override the key for this invocation |
 | `--url <base>` | Override base URL for this invocation |
 | `-h, --help` | Help |
@@ -152,9 +156,9 @@ can terminate a source that cannot be closed cleanly.
 ## Durations
 
 Flags that take a duration accept Go-style strings with an added `d` unit: `30s`, `15m`, `1h`,
-`36h`, `7d`. Plain integers are seconds. File lifetimes above the plan maximum are rejected;
-links are clamped to their plan maximum and never outlive their file. Both cap at 7d on Free and
-30d on Paid, and the CLI prints the effective expiry returned by the server.
+`36h`, `7d`. Plain integers are seconds. File lifetimes above the plan maximum are rejected: 7d on
+Free and 30d on Pro. Public links require Pro, are clamped to its 30d maximum, and never outlive
+their file. The CLI prints the effective expiry returned by the server.
 
 ## Commands
 
@@ -220,7 +224,7 @@ is supported for convenience but is not recommended on shared machines because p
 may be visible to other users.
 
 The encrypted manifest is authenticated and displayed before the server-side claim is created.
-The sender is shown as `Unknown sender` unless a future signed identity is present—encryption does
+The sender is shown as `Unknown sender` unless a signed identity is present—encryption does
 not prove who sent a transfer. After confirmation, ciphertext is streamed into mode-`0600`
 `.partial` files, retried with HTTP ranges at authenticated chunk boundaries, and checked against
 both chunk tags and whole-file SHA-256 hashes. Existing paths are rejected unless `--overwrite` is
@@ -300,7 +304,7 @@ file is removed after the request. There is no size limit on the CLI side; the s
 `aispace quota --json | jq .limits.max_file_bytes` before large uploads.
 
 When neither `--private` nor `--shared` is supplied, the server applies the account's “Share files
-between my keys” setting, which is enabled by default. Account sharing is authenticated and does
+between my keys” setting, which is disabled by default. Account sharing is authenticated and does
 not create a public URL. `--link` is a separate, explicit public-sharing action available on Pro.
 
 ```sh
@@ -596,10 +600,10 @@ aispace quota [--json]
 Five lines, one per group:
 
 ```
-key: used 1.0 MB of 50.0 MB, 49.0 MB remaining
-account: used 3.0 MB of 100.0 MB, 97.0 MB remaining, plan free (extra blocks 0)
+key: used 1.0 MB of 5.0 MB, 4.0 MB remaining
+account: used 3.0 MB of 10.0 MB, 7.0 MB remaining, plan free (extra blocks 0)
 month: uploads 12/100, downloads 340/1000, resets 2025-10-01T00:00:00Z
-limits: max file 25.0 MB, max file ttl 30d, max link ttl 7d, uploads 60/h 500/d, requests 300/min
+limits: max file 5.0 MB, max file ttl 7d, max link ttl 7d, uploads 60/h 500/d, requests 300/min
 rate: uploads remaining 58 this hour, 490 today; requests remaining 299 this minute
 ```
 
@@ -701,10 +705,10 @@ aispace recipient verify ALIAS --fingerprint FINGERPRINT
 aispace recipient list
 aispace recipient remove ALIAS
 
-aispace transfer create PATH --to ALIAS [--from ID] [--also-link]
+aispace transfer create PATH --sealed --to ALIAS [--from ID] [--also-link]
 aispace inbox list [--cursor CURSOR] [--limit 100]
 aispace inbox receive DELIVERY_ID [--identity ID] [--output DIR] [--yes]
-                        [--allow-unknown-sender]
+                        [--overwrite] [--allow-unknown-sender]
 aispace inbox reject DELIVERY_ID [--identity ID]
 aispace inbox processed DELIVERY_ID [--identity ID]
 ```
@@ -739,8 +743,8 @@ instead of generating an incompatible replacement.
 
 `inbox receive` unwraps the content key with RFC 9180 HPKE, checks manifest
 recipient and sender bindings, verifies every authenticated chunk and file
-hash, installs files only after verification, then submits a recipient-signed
-`verified` receipt. A valid signature from a key that is not locally pinned is
+hash, installs files only after verification, then submits recipient-signed `downloaded` and
+`verified` receipts. A valid signature from a key that is not locally pinned is
 reported as `Signature valid; sender unknown`, never as a verified sender.
 Historical sender verification uses the authenticated claim-time key snapshot,
 not a live public lookup. Revoked or expired signing keys and disabled sender
@@ -753,7 +757,6 @@ Exact signed downloaded, verified, processed and rejected receipt requests are
 persisted before submission. A restart replays the same receipt ID, signature,
 claim nonce and idempotency key until the service acknowledges it, then advances
 or removes the local sequence state.
-
 
 Upload a directory as a tarball with a single-download link:
 
@@ -819,9 +822,11 @@ completion is not silently lost. Pass `--force` to replace it, or `--dir` to ins
 Two shells need one more step, reported on stderr so stdout stays just the installed path:
 
 - **zsh** reads the directory only if it is on `$fpath`. Add to `~/.zshrc` if missing:
+
   ```sh
   fpath=(~/.local/share/zsh/site-functions $fpath)
   ```
+
 - **bash** reads the directory only when the `bash-completion` package is loaded.
 
 Start a new shell afterwards, or re-run the shell's completion init.

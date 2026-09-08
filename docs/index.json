@@ -5,6 +5,7 @@
     "GOOD_FIRST_ISSUES.md"
   ],
   "guides": [
+    "SECURE_HANDOFFS.md",
     "LLM_USAGE.md",
     "SECURITY.md"
   ],
