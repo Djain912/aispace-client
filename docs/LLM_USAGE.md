@@ -8,6 +8,10 @@ Prerequisites: a human created a bot key in the dashboard and gave it to the age
 `AISPACE_KEY` (preferred: an environment variable, never pasted into the prompt), and the
 `aispace` CLI is on `PATH` (`curl -fsSL https://aispace.sh/install.sh | sh`).
 
+Public links require Pro. On Free, or between keys belonging to the same account, use an explicit
+`--shared` upload and exchange the file ID. For sealed bundles, addressed inboxes, identity trust,
+device pairing, and their feature-availability checks, use [Secure handoffs](SECURE_HANDOFFS.md).
+
 ## System prompt snippet
 
 ```
@@ -17,8 +21,9 @@ long or too structured for chat (reports, tables, code bundles, images).
 - Upload and link in one call:  echo "$CONTENT" | aispace upload - --name NAME --link --link-expires 1h --json
   or for a file on disk:        aispace upload PATH --link --link-expires 1h --json
 - Parse `.link.url` from the JSON and give that URL to the user, together with when it expires.
-- Do not add `--link` for ordinary storage or same-account agent handoffs. Uploads inherit the
-  account key-sharing setting; sibling agents use `aispace download FILE_ID --output PATH`.
+- Do not add `--link` for ordinary storage or same-account agent handoffs. Add `--shared`
+  explicitly; account sharing is disabled by default. Sibling agents then use
+  `aispace download FILE_ID --output PATH`.
 - Default to a 1-hour link (`--link-expires 1h`). Use up to 24h only if the user says they will
   read it later. Add `--max-downloads 1` for anything sensitive.
 - Files themselves expire after 7 days by default (`--expires`); the maximum is 7 days on the
@@ -92,8 +97,8 @@ Anthropic `tools[]` entries (rename `parameters` → `input_schema` for Anthropi
         "path": { "type": "string", "description": "Path to an existing local file to upload. Provide either content or path." },
         "content_type": { "type": "string", "description": "MIME type. Defaults from the extension." },
         "expires": { "type": "string", "description": "File lifetime such as 1h, 3d, 7d. Maximum 7d on the free plan, 30d on Pro; longer values are rejected. Default 7d.", "default": "7d" },
-        "link": { "type": "boolean", "description": "Also create a public share link. Enable only when sharing outside the account is requested.", "default": false },
-        "link_expires": { "type": "string", "description": "Link lifetime such as 15m, 1h, 24h. Maximum 7d on the free plan and 30d on paid, and never past the file's own expiry; longer values are clamped. Default 1h.", "default": "1h" },
+        "link": { "type": "boolean", "description": "Also create a Pro-only public share link. Enable only when sharing outside the account is requested.", "default": false },
+        "link_expires": { "type": "string", "description": "Pro public-link lifetime such as 15m, 1h, 24h. Maximum 30d and never past the file's own expiry; longer values are clamped. Default 1h.", "default": "1h" },
         "max_downloads": { "type": "integer", "minimum": 1, "description": "Optional cap on downloads for the link. Use 1 for sensitive one-shot delivery." },
         "encrypt": { "type": "boolean", "description": "Encrypt locally with age X25519 before upload. The service stores ciphertext only.", "default": false },
         "recipient": { "type": "string", "description": "Optional age1... public recipient owned by the receiver. If omitted while encrypt=true, a one-time secret identity is generated." },
@@ -104,12 +109,12 @@ Anthropic `tools[]` entries (rename `parameters` → `input_schema` for Anthropi
   },
   {
     "name": "aispace_link",
-    "description": "Create a new expiring share link for a file that was already uploaded to aispace (by file_id). Use when the previous link expired or a second recipient needs a separate link.",
+    "description": "On Pro, create a new expiring share link for a file that was already uploaded to aispace (by file_id). Use when the previous link expired or a second recipient needs a separate link.",
     "parameters": {
       "type": "object",
       "properties": {
         "file_id": { "type": "string", "description": "The file id returned by aispace_upload." },
-        "expires": { "type": "string", "description": "Link lifetime such as 15m, 1h, 24h. Maximum 7d on the free plan and 30d on paid, and never past the file's own expiry. Default 1h.", "default": "1h" },
+        "expires": { "type": "string", "description": "Pro public-link lifetime such as 15m, 1h, 24h. Maximum 30d and never past the file's own expiry. Default 1h.", "default": "1h" },
         "max_downloads": { "type": "integer", "minimum": 1 }
       },
       "required": ["file_id"]
@@ -131,7 +136,7 @@ Anthropic `tools[]` entries (rename `parameters` → `input_schema` for Anthropi
 ]
 ```
 
-Reference implementation of the two tool handlers (Python, subprocess over the CLI):
+Reference implementation of the three tool handlers (Python, subprocess over the CLI):
 
 ```python
 import json, subprocess, tempfile, os
@@ -144,7 +149,7 @@ def _run(args, stdin=None):
     return json.loads(p.stdout)
 
 def aispace_upload(name, content=None, path=None, content_type=None, expires="7d",
-                   link=True, link_expires="1h", max_downloads=None,
+                   link=False, link_expires="1h", max_downloads=None,
                    encrypt=False, recipient=None, identity_out=None):
     args = ["upload", path or "-", "--name", name, "--expires", expires]
     if content_type: args += ["--content-type", content_type]
@@ -181,11 +186,13 @@ def aispace_decrypt(source, identity_file, output):
     return _run(["decrypt", source, "--identity-file", identity_file, "--output", output])
 ```
 
-If you prefer not to ship the CLI in the agent's sandbox, the same two tools are two HTTP calls:
+If you prefer not to ship the CLI in the agent's sandbox, upload and link creation are HTTP calls:
 `POST /v1/files` (raw body + `X-File-Name`) then `POST /v1/files/:id/links`. See
 [API.md](API.md).
 
 ## Example transcript
+
+This public-link example requires Pro.
 
 ```
 user:  Compare the three vendor quotes in ./quotes/*.pdf and give me something I can forward to
@@ -193,7 +200,7 @@ user:  Compare the three vendor quotes in ./quotes/*.pdf and give me something I
 
 agent: (reads the PDFs, builds a comparison)
        [tool aispace_upload {"name": "vendor-comparison.md", "content": "# Vendor comparison\n...",
-                             "link_expires": "1h", "max_downloads": 3}]
+                             "link": true, "link_expires": "1h", "max_downloads": 3}]
 tool:  {"file_id": "01J8ZQ3V9N7X2K4M6P8R0T2W4Y", "size_bytes": 4812,
         "url": "https://aispace.sh/d/K3f9Qm2xP7vL1nR8sT4wY6zA0bC5dE9fG3hJ7kM2nP4",
         "link_id": "01J8ZQ4A2B4C6D8E0F2G4H6J8K", "expires_at": 1757003600}
@@ -217,7 +224,7 @@ agent: New link, valid for 24 hours, no download cap:
 ```
 
 Note the agent did not re-upload; it minted a second link on the existing file. The first link
-still works until it expires or the agent runs `aispace revoke`.
+still works until it expires, is exhausted, or the agent runs `aispace revoke`.
 
 ## Choosing expirations and download caps
 
@@ -237,10 +244,10 @@ Rules of thumb:
 - `--max-downloads 1` turns a link into a one-time token; browsers and previewers may pre-fetch
   with `HEAD` (which does not count) but a second `GET` will 404. Use `2` or `3` if the user is
   likely to open it on two devices.
-- Mint **one link per recipient**; revoking one does not affect the others and the counters tell
-  you who downloaded.
+- Mint **one link per recipient**; revoking one does not affect the others and the counters show
+  which issued link was used. aispace does not identify the person behind a public download.
 - Never bump a file's expiry: it is fixed at upload. If you need it longer, re-upload.
-- Everything is gone after at most 7 days (free) or 30 days (Pro). Say so when handing over
+- File bytes become unavailable after at most 7 days (Free) or 30 days (Pro). Say so when handing over
   anything the user might want to keep ("download it before Friday"). Read
   `limits.max_file_ttl_seconds` from `aispace quota --json` rather than assuming 30 days: on the
   free plan a `--expires 30d` is rejected; request no more than the reported maximum.

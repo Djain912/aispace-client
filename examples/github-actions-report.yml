@@ -17,7 +17,7 @@ jobs:
           go test ./... > artifacts/test-report.txt
       - name: Install aispace
         env:
-          AISPACE_VERSION: v0.1.0
+          AISPACE_VERSION: v0.3.0
         run: curl -fsSL https://aispace.sh/install.sh | sh
       - name: Upload report
         env:

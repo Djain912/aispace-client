@@ -219,6 +219,7 @@ func isolate(t *testing.T) string {
 	t.Setenv(config.EnvKey, "")
 	t.Setenv(config.EnvURL, "")
 	t.Setenv(identityEnv, "")
+	t.Setenv(transferTokenEnv, "")
 	p, err := config.Path()
 	if err != nil {
 		t.Fatalf("config.Path() while isolating the test: %v", err)

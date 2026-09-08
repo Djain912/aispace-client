@@ -4,6 +4,10 @@ These examples show common agent and automation workflows. They make real API ca
 `aispace`, authenticate with `aispace login` or `AISPACE_KEY`, and inspect `aispace quota --json`
 before uploading a large artifact or running a batch.
 
+These scripts demonstrate the stable legacy file API and age encryption. For experimental sealed
+bundles, identity-addressed inboxes, device pairing, adaptive R2 fallback, and recovery, follow
+[`../docs/SECURE_HANDOFFS.md`](../docs/SECURE_HANDOFFS.md).
+
 ## Share a generated report
 
 [`share-report.sh`](share-report.sh) uploads one file and emits a small JSON handoff containing the
@@ -33,7 +37,7 @@ decrypt the artifact; losing the identity makes it unrecoverable.
 
 [`github-actions-report.yml`](github-actions-report.yml) is a copyable GitHub Actions job. It uploads
 a test report only on an explicit `workflow_dispatch`, then writes the expiring URL to the workflow
-summary. Add `AISPACE_KEY` as a repository secret before using it.
+summary. Public links require Pro. Add `AISPACE_KEY` as a repository secret before using it.
 
 ## Wire aispace into an LLM
 

@@ -29,12 +29,16 @@
 structured, or temporary for chat. The open-source client is deliberately easy to automate: one
 binary, stable exit codes, streaming uploads, and share URLs printed on a predictable final line.
 
-- **Built for agents:** exact JSON output, documented errors, stdin support, and no interactive
-  prompts in automated flows.
+- **Built for agents:** stable JSON on supported commands, documented errors, stdin support, and
+  explicit noninteractive flags for automation. Secret-bearing handoff commands remain interactive.
 - **Short-lived by design:** file expiration, separately expiring links, revocation, and optional
   per-link download caps.
-- **Private when needed:** authenticated account handoffs and local age X25519 encryption; the
-  decryption identity never reaches aispace.
+- **Private when needed:** sealed asynchronous transfers encrypt filenames, file metadata, and
+  content locally; their master key never reaches aispace. The existing age X25519 flow remains
+  available for recipient-key workflows.
+
+Sealed transfers, agent identities, device pairing, and adaptive durable-first intent are
+experimental surfaces. Ordinary uploads and durable R2 storage continue to work alongside them.
 
 The hosted service is operated separately. This repository contains the client, agent skill, and
 integration examples—not the server, billing system, deployment configuration, or customer data.
@@ -125,6 +129,22 @@ aispace upload secret.pdf --encrypt --identity-out secret.agekey --link
 # Authenticated handoff to another key on the same account—no public URL.
 aispace upload notes.md --shared --json
 
+# Sealed multi-file handoff. The URL fragment holds the local decryption secret.
+aispace transfer create report.pdf charts.png --sealed --link --expires 1d --max-downloads 1
+
+# Move that sealed transfer to a nearby browser/device with an expiring code.
+aispace handoff offer "$TRANSFER_ID"
+# On the receiving CLI: aispace handoff receive J7KM-PQRT
+
+# Pin an agent and deliver without exposing a bearer decryption link.
+aispace recipient add "$RECIPIENT_INVITATION"
+aispace recipient verify research-agent --fingerprint "$RECIPIENT_FINGERPRINT"
+aispace transfer create report.pdf --sealed --to research-agent --from my-agent --expires 7d
+aispace inbox receive "$DELIVERY_ID" --yes
+
+# Paste the link interactively, inspect its private manifest, then decrypt and verify.
+aispace transfer receive
+
 # Receive, manage, and revoke.
 aispace ls --json
 aispace download <file_id> --output ./file
@@ -134,13 +154,23 @@ aispace revoke <link_id>
 aispace rm <file_id>
 ```
 
-The complete command reference is in [`docs/CLI.md`](docs/CLI.md); the HTTP contract is in
-[`docs/API.md`](docs/API.md).
+Follow [`docs/SECURE_HANDOFFS.md`](docs/SECURE_HANDOFFS.md) for sealed bundles, trusted agent
+inboxes, device pairing, adaptive R2 fallback, and recovery. The complete command reference is in
+[`docs/CLI.md`](docs/CLI.md); the HTTP contract is in [`docs/API.md`](docs/API.md).
 
 `upload` accepts `--name`, `--expires`, `--content-type`, `--sha256`, `--link`, `--link-expires`,
 `--max-downloads`, `--private`, `--shared`, `--encrypt`, `--recipient`, and `--identity-out`.
 Uploads stream from disk. Encrypted uploads use age X25519 locally and store ciphertext as
 `<name>.age`; the secret identity is never sent to the API.
+
+`transfer create` uses `aispace-sealed-v1`: AES-256-GCM authenticated chunks and an encrypted
+manifest support multiple files, ranged retry, and a verified receipt. `transfer receive` accepts
+the secret from its prompt, `--token-file`, or `AISPACE_TRANSFER_TOKEN`; avoid putting a full
+fragment link or token in a process argument on shared systems.
+
+`transfer create --json` omits bearer links and tokens unless `--include-secret` is explicit, and
+secret-inclusive JSON must be redirected rather than written to a terminal. `handoff encode`
+likewise accepts the protected prompt, `--token-file`, or `AISPACE_TRANSFER_TOKEN`.
 
 With `--json`, errors also remain structured and are written to stderr. `upload --link --json`
 returns `{"file": File, "link": ShareLink}`; encrypted uploads add an `"encryption"` object.
@@ -161,7 +191,8 @@ Config file: `$XDG_CONFIG_HOME/aispace/config.json` (default `~/.config/aispace/
 mode 0600. A warning is printed if the file is readable by others. `AISPACE_CONFIG` overrides the path.
 
 Durations (`--expires`, `--link-expires`) accept Go syntax plus a `d` suffix: `30m`, `24h`, `7d`, `1d12h`,
-or a bare number of seconds. Omitting them uses the server defaults (7 days for files, 1 hour for links).
+or a bare number of seconds. Omitting them uses the server defaults (7 days for files, 1 hour for
+Pro public links).
 
 ## File permissions and links
 
