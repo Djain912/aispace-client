@@ -110,6 +110,35 @@ Restart Codex, then ask it to use `aispace` when it needs to hand you a report, 
 other generated artifact. The skill defaults to account-private storage unless you request a public
 link, prefers short expirations, and treats encryption identities as credentials.
 
+### Model Context Protocol (MCP)
+
+The native CLI also exposes ten typed MCP tools over local stdio. Create a separately scoped bot
+key in the dashboard, export it in the environment that launches Codex, and add:
+
+```toml
+[mcp_servers.aispace]
+command = "aispace"
+args = ["mcp", "serve"]
+env_vars = ["AISPACE_KEY", "AISPACE_URL", "AISPACE_ALLOWED_ROOTS"]
+startup_timeout_sec = 10
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"
+
+[mcp_servers.aispace.tools.aispace_create_link]
+approval_mode = "prompt"
+
+[mcp_servers.aispace.tools.aispace_revoke_link]
+approval_mode = "prompt"
+
+[mcp_servers.aispace.tools.aispace_delete_file]
+approval_mode = "prompt"
+```
+
+Run `codex mcp list` to verify the connection. The ChatGPT desktop app, Codex CLI, and Codex IDE
+extension on the same host share this configuration. Keep the key in a secret store or injected
+environment; never put its expanded value in a committed project file or command argument. See
+[`docs/CLI.md`](docs/CLI.md#mcp-server) for Claude Code and generic-host examples.
+
 For custom agent runtimes, [`docs/LLM_USAGE.md`](docs/LLM_USAGE.md) includes a system-prompt snippet,
 OpenAI/Anthropic-compatible tool schemas, and a reference Python handler. See [`examples`](examples)
 for runnable shell, CI, and encrypted-handoff recipes.
@@ -241,8 +270,10 @@ review the [`CHANGELOG.md`](CHANGELOG.md). Focused bug reports and feature propo
 repository's structured issue forms.
 
 Releases are cut through the manual GitHub Actions workflow. GoReleaser builds checksummed macOS,
-Linux, and Windows binaries, updates the Homebrew tap, and publishes `@aispace-sh/cli` to npm. See
-[`RELEASE.md`](RELEASE.md) for publisher configuration and the release checklist.
+Linux, and Windows binaries, updates the Homebrew tap, publishes `@aispace-sh/cli` to npm, verifies
+the installed MCP server on all three platforms, and finally publishes `sh.aispace/mcp` to the
+official Registry. See [`RELEASE.md`](RELEASE.md) for publisher configuration, resumable MCP-only
+publication, and the release checklist.
 
 ## Security
 

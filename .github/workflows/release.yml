@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      mcp_only:
+        description: Publish or verify MCP metadata for an existing release without rerunning other release jobs
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -38,19 +43,27 @@ jobs:
         env:
           VERSION_INPUT: ${{ inputs.version }}
           RESUME: ${{ inputs.resume }}
+          MCP_ONLY: ${{ inputs.mcp_only }}
         run: |
           VERSION="${VERSION_INPUT#v}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "version must look like 0.1.0" >&2
             exit 1
           fi
-          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "releases must be started from the main branch" >&2
-            exit 1
-          fi
           TAG="v$VERSION"
           TAG_EXISTS=false
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+          SHA="$(git rev-parse HEAD)"
+          if [ "$MCP_ONLY" = "true" ]; then
+            if ! git rev-parse --verify "refs/tags/$TAG^{commit}" >/dev/null 2>&1; then
+              echo "MCP-only publication requires existing tag $TAG" >&2
+              exit 1
+            fi
+            TAG_EXISTS=true
+            SHA="$(git rev-list -n 1 "$TAG")"
+          elif [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "releases must be started from the main branch" >&2
+            exit 1
+          elif git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             if [ "$RESUME" != "true" ]; then
               echo "tag $TAG already exists; select resume only to recover that exact release" >&2
               exit 1
@@ -66,13 +79,14 @@ jobs:
           {
             echo "version=$VERSION"
             echo "tag=$TAG"
-            echo "sha=$(git rev-parse HEAD)"
+            echo "sha=$SHA"
             echo "tag_exists=$TAG_EXISTS"
           } >> "$GITHUB_OUTPUT"
 
   credentials:
     name: Verify release credentials
     needs: validate
+    if: inputs.mcp_only != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -102,6 +116,7 @@ jobs:
   preflight:
     name: Test release candidate
     needs: validate
+    if: inputs.mcp_only != true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -117,21 +132,34 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+      - name: Stamp release metadata
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: node scripts/stamp-release-version.mjs "$VERSION"
       - name: Run Go checks
         run: |
           test -z "$(gofmt -l .)"
           go vet ./...
           go test -race ./...
           go build -trimpath -o aispace .
+          node scripts/smoke-mcp.mjs ./aispace
+          node --test scripts/*.test.mjs
+          node scripts/validate-index-json.mjs .
           sh -n install.sh examples/*.sh
       - name: Test npm package
         working-directory: npm
-        env:
-          VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          npm version "$VERSION" --no-git-tag-version
           npm test
           npm publish --dry-run --access public
+      - name: Validate MCP Registry metadata
+        env:
+          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+          MCP_PUBLISHER_VERSION: 1.8.1
+        run: |
+          curl -fL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" -o mcp-publisher.tar.gz
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum --check --strict
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher validate server.json
       - name: Build release snapshot
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
@@ -142,6 +170,7 @@ jobs:
   publish:
     name: Publish release
     needs: [validate, credentials, preflight]
+    if: inputs.mcp_only != true
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -224,6 +253,7 @@ jobs:
   npm:
     name: Publish npm package
     needs: [validate, publish]
+    if: inputs.mcp_only != true
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -238,10 +268,9 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - name: Set package version
-        working-directory: npm
         env:
           VERSION: ${{ needs.validate.outputs.version }}
-        run: npm version "$VERSION" --no-git-tag-version
+        run: node scripts/stamp-release-version.mjs "$VERSION"
       - name: Check for an existing npm publication
         id: npm_state
         working-directory: npm
@@ -264,15 +293,19 @@ jobs:
   verify:
     name: Verify published package (${{ matrix.os }})
     needs: [validate, npm]
+    if: inputs.mcp_only != true
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
         shell: bash
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -290,3 +323,76 @@ jobs:
           done
           ACTUAL_VERSION="$(aispace version --json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')"
           test "$ACTUAL_VERSION" = "$VERSION"
+          node scripts/smoke-mcp.mjs aispace
+
+  mcp:
+    name: Publish MCP Registry metadata
+    needs: [validate, verify]
+    if: always() && needs.validate.result == 'success' && (needs.verify.result == 'success' || inputs.mcp_only == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Stamp release metadata
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: node scripts/stamp-release-version.mjs "$VERSION"
+      - name: Verify the npm release exists
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: test "$(npm view "@aispace-sh/cli@$VERSION" version)" = "$VERSION"
+      - name: Check for an existing Registry publication
+        id: registry_state
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          RESPONSE="$(curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers?search=sh.aispace%2Fmcp&version=${VERSION}&limit=10")"
+          if jq -e --arg version "$VERSION" '.servers[]? | select(.server.name == "sh.aispace/mcp" and .server.version == $version)' <<<"$RESPONSE" >/dev/null; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "sh.aispace/mcp@$VERSION is already published; preserving immutable metadata"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install MCP Registry publisher
+        if: steps.registry_state.outputs.published != 'true'
+        env:
+          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+          MCP_PUBLISHER_VERSION: 1.8.1
+        run: |
+          curl -fL "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" -o mcp-publisher.tar.gz
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum --check --strict
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher validate server.json
+      - name: Authenticate to the MCP Registry
+        if: steps.registry_state.outputs.published != 'true'
+        env:
+          MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
+        run: |
+          if [ -z "$MCP_PRIVATE_KEY" ]; then
+            echo "MCP_PRIVATE_KEY is not set; add the aispace.sh DNS-auth private key as a repository secret" >&2
+            exit 1
+          fi
+          ./mcp-publisher login dns --domain aispace.sh --private-key "$MCP_PRIVATE_KEY"
+      - name: Publish MCP metadata
+        if: steps.registry_state.outputs.published != 'true'
+        run: ./mcp-publisher publish server.json
+      - name: Verify Registry discovery
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            RESPONSE="$(curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers?search=sh.aispace%2Fmcp&version=${VERSION}&limit=10")"
+            if jq -e --arg version "$VERSION" '.servers[]? | select(.server.name == "sh.aispace/mcp" and .server.version == $version and (.server.packages[]? | select(.registryType == "npm" and .identifier == "@aispace-sh/cli" and .version == $version)))' <<<"$RESPONSE" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Registry did not return sh.aispace/mcp@$VERSION with the matching npm package" >&2
+          exit 1

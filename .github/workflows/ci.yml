@@ -43,7 +43,7 @@ jobs:
         run: sh -n install.sh examples/*.sh
         if: runner.os == 'Linux'
       - name: Validate documentation inventory
-        run: node --test scripts/validate-index-json.test.mjs && node scripts/validate-index-json.mjs .
+        run: node --test scripts/*.test.mjs && node scripts/validate-index-json.mjs .
         if: runner.os == 'Linux'
       - name: Test npm wrapper
         working-directory: npm

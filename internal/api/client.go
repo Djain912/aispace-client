@@ -101,6 +101,8 @@ type UploadOptions struct {
 	SHA256 string
 	// Visibility overrides the account default when set to "private" or "account".
 	Visibility string
+	// IdempotencyKey identifies one logical upload. Empty preserves the legacy CLI behavior.
+	IdempotencyKey string
 }
 
 // Upload streams body to POST /v1/files.
@@ -139,6 +141,7 @@ func (c *Client) Upload(ctx context.Context, body io.Reader, opts UploadOptions)
 	if opts.Visibility != "" {
 		req.Header.Set("X-File-Visibility", opts.Visibility)
 	}
+	setIdempotencyKey(req, opts.IdempotencyKey)
 	res, err := doRequest[File](c, req, http.StatusCreated, watch)
 	if errors.Is(context.Cause(transferCtx), ErrTransferStalled) {
 		return Result[File]{}, stalledError()
@@ -149,12 +152,19 @@ func (c *Client) Upload(ctx context.Context, body io.Reader, opts UploadOptions)
 // Download opens an authenticated stream from GET /v1/files/:id/content.
 // The caller must close the response body.
 func (c *Client) Download(ctx context.Context, id string) (*http.Response, error) {
+	return c.DownloadWithIdempotency(ctx, id, "")
+}
+
+// DownloadWithIdempotency opens an authenticated stream and identifies retries
+// of the same logical download to the service.
+func (c *Client) DownloadWithIdempotency(ctx context.Context, id, idempotencyKey string) (*http.Response, error) {
 	transferCtx, watch := startTransferWatch(ctx, c.InactivityTimeout)
 	req, err := c.newRequest(transferCtx, http.MethodGet, "/v1/files/"+url.PathEscape(id)+"/content", nil)
 	if err != nil {
 		watch.stop()
 		return nil, err
 	}
+	setIdempotencyKey(req, idempotencyKey)
 	httpc := c.HTTP
 	if httpc == nil {
 		httpc = http.DefaultClient

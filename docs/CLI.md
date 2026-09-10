@@ -162,6 +162,66 @@ their file. The CLI prints the effective expiry returned by the server.
 
 ## Commands
 
+### MCP server
+
+`aispace mcp serve` runs the native client as a local stdio Model Context Protocol server. It
+exposes exactly ten tools for identity/quota inspection, bounded file and link listing, private-by-
+default upload, verified download, explicit public-link creation, revocation, and deletion. It
+prints protocol messages only to stdout and stops on stdin EOF or cancellation.
+
+Authentication is resolved from `AISPACE_KEY` before the existing mode-0600 client configuration.
+The service origin comes from `AISPACE_URL`, configured URL, or `https://aispace.sh`. Plain HTTP is
+accepted only for an explicitly configured loopback development server. `--key` is rejected for
+this command because process arguments may be visible to other users.
+
+Local upload and download paths are limited by `AISPACE_ALLOWED_ROOTS`, then intersected with MCP
+roots supplied by the host. Without either, access is limited to the canonical working directory.
+Downloads verify their recorded SHA-256 digest, do not overwrite by default, and publish the final
+file only after verification.
+
+Codex configuration:
+
+```toml
+[mcp_servers.aispace]
+command = "aispace"
+args = ["mcp", "serve"]
+env_vars = ["AISPACE_KEY", "AISPACE_URL", "AISPACE_ALLOWED_ROOTS"]
+startup_timeout_sec = 10
+tool_timeout_sec = 120
+default_tools_approval_mode = "writes"
+
+[mcp_servers.aispace.tools.aispace_create_link]
+approval_mode = "prompt"
+[mcp_servers.aispace.tools.aispace_revoke_link]
+approval_mode = "prompt"
+[mcp_servers.aispace.tools.aispace_delete_file]
+approval_mode = "prompt"
+```
+
+Claude Code user configuration (the single quotes prevent the shell from expanding the key):
+
+```sh
+claude mcp add-json --scope user aispace \
+  '{"type":"stdio","command":"aispace","args":["mcp","serve"],"env":{"AISPACE_KEY":"${AISPACE_KEY}"}}'
+claude mcp get aispace
+```
+
+Generic stdio host configuration:
+
+```json
+{
+  "mcpServers": {
+    "aispace": {
+      "command": "aispace",
+      "args": ["mcp", "serve"],
+      "env": { "AISPACE_KEY": "<injected by the host secret store>" }
+    }
+  }
+}
+```
+
+Never commit an expanded bot key. Use a distinct scoped key and budget for each agent or host.
+
 ### `aispace transfer create`
 
 ```sh

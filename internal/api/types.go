@@ -29,14 +29,15 @@ type ShareLink struct {
 
 // BotKey mirrors the API BotKey object.
 type BotKey struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Prefix      string `json:"prefix"`
-	BudgetBytes int64  `json:"budget_bytes"`
-	UsedBytes   int64  `json:"used_bytes"`
-	CreatedAt   int64  `json:"created_at"`
-	LastUsedAt  *int64 `json:"last_used_at"`
-	RevokedAt   *int64 `json:"revoked_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Prefix        string `json:"prefix"`
+	BudgetBytes   int64  `json:"budget_bytes"`
+	BudgetLimited bool   `json:"budget_limited"`
+	UsedBytes     int64  `json:"used_bytes"`
+	CreatedAt     int64  `json:"created_at"`
+	LastUsedAt    *int64 `json:"last_used_at"`
+	RevokedAt     *int64 `json:"revoked_at"`
 }
 
 // Whoami is the GET /v1/whoami response.

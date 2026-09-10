@@ -155,6 +155,7 @@ func (a *app) newRootCmd() *cobra.Command {
 	})
 
 	root.AddCommand(
+		a.mcpCmd(),
 		a.loginCmd(),
 		a.keygenCmd(),
 		a.uploadCmd(),
