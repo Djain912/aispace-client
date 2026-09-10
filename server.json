@@ -1,0 +1,46 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "sh.aispace/mcp",
+  "title": "aispace",
+  "description": "Secure, expiring artifact storage and handoff for AI agents.",
+  "repository": {
+    "url": "https://github.com/aispace-sh/aispace-client",
+    "source": "github"
+  },
+  "version": "0.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@aispace-sh/cli",
+      "version": "0.0.0",
+      "packageArguments": [
+        { "type": "positional", "value": "mcp" },
+        { "type": "positional", "value": "serve" }
+      ],
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "AISPACE_KEY",
+          "description": "Scoped aispace bot key (ask_...).",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "AISPACE_URL",
+          "description": "Optional aispace service origin; defaults to https://aispace.sh.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "AISPACE_ALLOWED_ROOTS",
+          "description": "Optional platform path-list restricting local file access.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

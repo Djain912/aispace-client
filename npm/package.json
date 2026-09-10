@@ -1,6 +1,7 @@
 {
   "name": "@aispace-sh/cli",
   "version": "0.0.0",
+  "mcpName": "sh.aispace/mcp",
   "description": "Secure temporary file sharing CLI for AI agents and humans, with expiring links and local age encryption",
   "license": "MIT",
   "homepage": "https://aispace.sh",

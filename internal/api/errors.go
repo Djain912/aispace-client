@@ -13,6 +13,7 @@ type Error struct {
 	Message    string          `json:"message"`
 	Details    json.RawMessage `json:"details,omitempty"`
 	RetryAfter int             `json:"retry_after,omitempty"`
+	RequestID  string          `json:"request_id,omitempty"`
 	cause      error
 }
 
@@ -52,7 +53,7 @@ type wireError struct {
 }
 
 func errorFromResponse(resp *http.Response, body []byte) *Error {
-	e := &Error{Status: resp.StatusCode}
+	e := &Error{Status: resp.StatusCode, RequestID: resp.Header.Get("X-Request-ID")}
 	var w wireError
 	if json.Unmarshal(body, &w) == nil && w.Error.Code != "" {
 		e.Code = w.Error.Code

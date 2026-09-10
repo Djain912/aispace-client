@@ -99,8 +99,9 @@ The URL is always the last output line; `--json` makes the entire exchange machi
 - Social preview is uploaded in GitHub repository settings.
 - Repository description, website, and topics match the canonical wording above.
 - The demo contains no real key, private link, file ID, or encryption identity.
-- Submit only to directories that accept hosted developer tools or agent skills; do not describe the
-  client as an MCP server or the hosted backend as open source.
+- Submit only to directories that accept local MCP servers, hosted developer tools, or agent skills.
+  Describe `aispace mcp serve` as a local stdio server packaged in the open-source client; do not
+  describe the separately hosted storage backend as open source.
 - Record the publication URL, date, copy, and referral/source tag for each post.
 
 Suggested first venues: Show HN, relevant developer-tool and AI-agent communities, the Go community,
